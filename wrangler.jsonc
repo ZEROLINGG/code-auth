@@ -13,7 +13,17 @@
 	},
 	"observability": {
 		"enabled": true
+	},
+	"kv_namespaces": [
+		{
+			"binding": "AUTH_KV",
+			"id": "5a8295dd41f44e6d982dd1240b7c4e97"
+		}
+	],
+	"vars": {
+		"ServerKey": ""
 	}
+
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
