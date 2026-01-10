@@ -4,8 +4,8 @@ import { Hono } from "hono";
 const app = new Hono<{ Bindings: CloudflareBindings }>();
 
 app.use("*", async (c, next) => {
-  if (!c.env.ServerKey) {
-    return c.text("Server configuration error" + c.env.ServerKey + (c.env.ServerKey === "") + "1", 500);
+  if (!c.env.SERVER_KEY) {
+    return c.text("Server configuration error", 500);
   }
 
   await next();

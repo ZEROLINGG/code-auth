@@ -21,7 +21,7 @@
 		}
 	],
 	"vars": {
-		"ServerKey": ""
+		"SERVER_KEY": ""
 	}
 
 	/**
