@@ -45,7 +45,7 @@ if ($envVars.ContainsKey("SUPER_ADMIN_IP")) {
 # 上传所有 secret
 foreach ($key in $envVars.Keys) {
     Write-Host "尝试删除已有 secret: $key" -ForegroundColor Yellow
-    wrangler secret delete $key   # -f 强制，不存在也不会报错
+    echo "y" | wrangler secret delete $key
 
     # 再上传新的 secret
     $value = $envVars[$key]
