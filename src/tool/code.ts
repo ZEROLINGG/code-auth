@@ -21,7 +21,7 @@ type AuthResult = [success: boolean, uuid: string, remaining: number];
 
 export class Product {
     private static readonly PRODUCT_KEY = "product";
-    private static readonly PRODUCT_ID_LENGTH = 12;
+    private static readonly PRODUCT_ID_LENGTH = 7;
 
     /**
      * 设置/添加产品
@@ -102,7 +102,7 @@ export class Code {
     private static readonly CODE_PREFIX = "C:";
     private static readonly CODE_INFO_PREFIX = "CI:";
     private static readonly COLON_CHAR_CODE = 58;
-    private static readonly RANDOM_S_LENGTH = 10;
+    private static readonly RANDOM_S_LENGTH = 7;
 
     /**
      * 生成激活码
@@ -119,11 +119,11 @@ export class Code {
         const s2 = `:${serverT.now() + expirationPeriod}:${activationDuration}:${amount}`;
 
         const [sha256_1, sha256_2] = await Promise.all([
-            Hash.sha256(s1),
-            Hash.sha256(s2)
+            Hash.sha1(s1),
+            Hash.sha1(s2)
         ]);
 
-        const mixed = await Hash.sha256(`${sha256_1}:${sha256_2}`);
+        const mixed = await Hash.sha1(`${sha256_1}:${sha256_2}`);
         const plaintext = `${s1}:${mixed}`;
 
         const encoder = new TextEncoder();
@@ -236,10 +236,10 @@ export class Code {
 
             // 验证哈希
             const [sha256_1, sha256_2] = await Promise.all([
-                Hash.sha256(`${randomS}:${prodId}`),
-                Hash.sha256(s2)
+                Hash.sha1(`${randomS}:${prodId}`),
+                Hash.sha1(s2)
             ]);
-            const recombined = await Hash.sha256(`${sha256_1}:${sha256_2}`);
+            const recombined = await Hash.sha1(`${sha256_1}:${sha256_2}`);
 
             if (recombined !== mixed) {
                 return [false, "", 0, 0];
@@ -261,7 +261,7 @@ export class Code {
         productId: string,
         binding: string = ""
     ): Promise<AuthResult> {
-        const key = `${this.CODE_PREFIX}${await Hash.sha256(code)}`;
+        const key = `${this.CODE_PREFIX}${await Hash.sha1(code)}`;
         const lock = await kvLock.acquire(kv, key);
 
         if (!lock) {
@@ -290,7 +290,7 @@ export class Code {
             // 创建新的使用记录
             const newUsed = used + 1;
             const uuid = crypto.randomUUID();
-            const bindingHash = await Hash.sha256(binding + key);
+            const bindingHash = await Hash.sha1(binding + key);
             const expirationTime = serverT.now() + duration;
 
             const codeInfo: ICodeInfo = {
@@ -322,7 +322,7 @@ export class Code {
         uuid: string,
         binding: string = ""
     ): Promise<AuthResult> {
-        const key = `${this.CODE_PREFIX}${await Hash.sha256(code)}`;
+        const key = `${this.CODE_PREFIX}${await Hash.sha1(code)}`;
         const lock = await kvLock.acquire(kv, key);
 
         if (!lock) {
@@ -346,7 +346,7 @@ export class Code {
             }
 
             const codeInfo = JSON.parse(ciStr) as ICodeInfo;
-            const bindingHash = await Hash.sha256(binding + key);
+            const bindingHash = await Hash.sha1(binding + key);
 
             // 验证认证信息
             if (
