@@ -1,0 +1,856 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>超级管理员</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* 自定义滚动条样式 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0a0a0a;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #2a2a2a;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3a3a3a;
+        }
+
+        /* Firefox 滚动条 */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: #2a2a2a #0a0a0a;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 16px;
+            font-weight: 500;
+            color: #666;
+            margin-bottom: 30px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #1a1a1a;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .section-title {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        .card {
+            background: #111;
+            border: 1px solid #1a1a1a;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .form-group.flex-1 {
+            flex: 1;
+            min-width: 150px;
+        }
+
+        label {
+            font-size: 12px;
+            color: #888;
+        }
+
+        input, select {
+            background: #0a0a0a;
+            border: 1px solid #222;
+            color: #e0e0e0;
+            padding: 10px 12px;
+            font-family: inherit;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+            border-radius: 3px;
+        }
+
+        input:focus, select:focus {
+            border-color: #444;
+        }
+
+        input::placeholder {
+            color: #444;
+        }
+
+        button {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #e0e0e0;
+            padding: 10px 20px;
+            font-family: inherit;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-radius: 3px;
+        }
+
+        button:hover {
+            background: #222;
+            border-color: #444;
+        }
+
+        button:active {
+            background: #0a0a0a;
+        }
+
+        button.primary {
+            background: #2a2a2a;
+            border-color: #4a4a4a;
+        }
+
+        button.primary:hover {
+            background: #333;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid #1a1a1a;
+        }
+
+        th {
+            color: #888;
+            font-weight: 500;
+            font-size: 12px;
+        }
+
+        tr:hover td {
+            background: #111;
+        }
+
+        .output {
+            background: #0a0a0a;
+            border: 1px solid #1a1a1a;
+            padding: 15px;
+            margin-top: 15px;
+            font-size: 13px;
+            max-height: 300px;
+            overflow-y: auto;
+            border-radius: 3px;
+        }
+
+        .output pre {
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .output.success {
+            border-color: #1a3a1a;
+        }
+
+        .output.error {
+            border-color: #3a1a1a;
+        }
+
+        .code-list {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .code-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            background: #0f0f0f;
+            border: 1px solid #1a1a1a;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .code-item:hover {
+            background: #151515;
+            border-color: #2a2a2a;
+        }
+
+        .code-item:active {
+            background: #0f0f0f;
+            transform: scale(0.99);
+        }
+
+        .code-item code {
+            flex: 1;
+            font-size: 13px;
+            color: #aaa;
+            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            user-select: all;
+            min-width: 0;
+        }
+
+        .code-item .text-muted {
+            flex-shrink: 0;
+        }
+
+        /* 复制提示 */
+        .code-item::after {
+            content: '点击复制';
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 11px;
+            color: #555;
+            opacity: 0;
+            transition: opacity 0.2s;
+            pointer-events: none;
+        }
+
+        .code-item:hover::after {
+            opacity: 1;
+        }
+
+        .status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        .status.online {
+            background: #3a5;
+            box-shadow: 0 0 8px #3a5;
+        }
+
+        .status.offline {
+            background: #a33;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .loading {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            padding: 12px 20px;
+            font-size: 13px;
+            z-index: 1000;
+            animation: fadeIn 0.2s;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+
+        .toast.error {
+            border-color: #533;
+            color: #e77;
+        }
+
+        .toast.success {
+            border-color: #353;
+            color: #7e7;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #1a1a1a;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            font-size: 13px;
+            color: #666;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: #aaa;
+        }
+
+        .tab.active {
+            color: #e0e0e0;
+            border-bottom-color: #555;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .inline-form {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .mt-10 {
+            margin-top: 10px;
+        }
+
+        .text-muted {
+            color: #666;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            font-size: 11px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 3px;
+        }
+
+        .info-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1><span class="status online" id="statusDot"></span>超级管理员控制台</h1>
+
+    <!-- Main Content -->
+    <div id="mainContent">
+        <!-- Tabs -->
+        <div class="tabs">
+            <div class="tab active" data-tab="products">产品管理</div>
+            <div class="tab" data-tab="generate">生成激活码</div>
+            <div class="tab" data-tab="batch">批量生成</div>
+        </div>
+
+        <!-- Products Tab -->
+        <div class="tab-content active" id="tab-products">
+            <div class="section">
+                <div class="section-title">添加产品</div>
+                <div class="card">
+                    <div class="inline-form">
+                        <div class="form-group flex-1">
+                            <label>产品名称</label>
+                            <input type="text" id="newProductName" placeholder="请输入产品名称">
+                        </div>
+                        <button onclick="checkProduct()" class="btn-sm">检查</button>
+                        <button onclick="addProduct()" class="primary">添加</button>
+                    </div>
+                    <div id="checkResult" class="output hidden"></div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">产品列表</div>
+                <div class="card">
+                    <button onclick="loadProducts()" class="btn-sm" style="margin-bottom: 15px;">刷新列表</button>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                            <tr>
+                                <th>产品 ID</th>
+                                <th>产品名称</th>
+                                <th>操作</th>
+                            </tr>
+                            </thead>
+                            <tbody id="productList">
+                            <tr><td colspan="3" class="text-muted">暂无产品数据</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Generate Tab -->
+        <div class="tab-content" id="tab-generate">
+            <div class="section">
+                <div class="section-title">生成激活码</div>
+                <div class="card">
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label>选择产品</label>
+                            <select id="genProductSelect">
+                                <option value="">请选择产品...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>生成方式</label>
+                            <select id="genByType">
+                                <option value="name">按名称</option>
+                                <option value="id">按 ID</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label>激活码有效期（秒）</label>
+                            <input type="number" id="genExpiration" value="2592000" placeholder="例如：2592000（30天）">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>激活后使用时长（秒）</label>
+                            <input type="number" id="genDuration" value="31536000" placeholder="例如：31536000（1年）">
+                        </div>
+                        <div class="form-group">
+                            <label>数量</label>
+                            <input type="number" id="genAmount" value="1" min="1">
+                        </div>
+                    </div>
+                    <div class="info-text">提示：激活码有效期指激活码可用于激活的时间，激活后使用时长指激活后产品的授权期限</div>
+                    <button onclick="generateCode()" class="primary mt-10">生成激活码</button>
+                    <div id="genResult" class="output hidden"></div>
+                </div>
+            </div>
+
+            <!-- Quick Presets -->
+            <div class="section">
+                <div class="section-title">快速预设</div>
+                <div class="card">
+                    <div class="form-row">
+                        <button onclick="setPreset(86400, 2592000)">1天 / 30天</button>
+                        <button onclick="setPreset(604800, 2592000)">7天 / 30天</button>
+                        <button onclick="setPreset(2592000, 31536000)">30天 / 1年</button>
+                        <button onclick="setPreset(7776000, 31536000)">90天 / 1年</button>
+                        <button onclick="setPreset(31536000, 31536000)">1年 / 1年</button>
+                    </div>
+                    <div class="info-text">快速设置激活码有效期和激活后使用时长</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Batch Tab -->
+        <div class="tab-content" id="tab-batch">
+            <div class="section">
+                <div class="section-title">批量生成激活码</div>
+                <div class="card">
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label>产品名称</label>
+                            <select id="batchProductSelect">
+                                <option value="">请选择产品...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>生成数量（1-100）</label>
+                            <input type="number" id="batchCount" value="10" min="1" max="100">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label>激活码有效期（秒）</label>
+                            <input type="number" id="batchExpiration" value="2592000">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>激活后使用时长（秒）</label>
+                            <input type="number" id="batchDuration" value="31536000">
+                        </div>
+                        <div class="form-group">
+                            <label>数量</label>
+                            <input type="number" id="batchAmount" value="1" min="1">
+                        </div>
+                    </div>
+                    <div class="form-row mt-10">
+                        <button onclick="batchGenerate()" class="primary">批量生成</button>
+                        <button onclick="copyAllCodes()" id="copyAllBtn" class="hidden">复制全部</button>
+                        <button onclick="downloadCodes()" id="downloadBtn" class="hidden">下载文件</button>
+                    </div>
+                    <div id="batchResult" class="output hidden">
+                        <div id="batchCodeList" class="code-list"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 状态管理
+    let products = [];
+    let generatedCodes = [];
+
+    // API 基础路径
+    const API_BASE = '/admin/su';
+
+    // 工具函数
+    function $(id) {
+        return document.getElementById(id);
+    }
+
+    function toast(message, type = 'info') {
+        const existing = document.querySelector('.toast');
+        if (existing) existing.remove();
+
+        const el = document.createElement('div');
+        el.className = 'toast ' + type;
+        el.textContent = message;
+        document.body.appendChild(el);
+
+        setTimeout(() => el.remove(), 3000);
+    }
+
+    async function api(endpoint, options = {}) {
+        try {
+            const res = await fetch(API_BASE + endpoint, {
+                ...options,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                }
+            });
+            return await res.json();
+        } catch (error) {
+            console.error('API 请求失败:', error);
+            throw error;
+        }
+    }
+
+    function formatSeconds(s) {
+        if (s >= 31536000) return (s / 31536000).toFixed(1) + '年';
+        if (s >= 86400) return (s / 86400).toFixed(0) + '天';
+        if (s >= 3600) return (s / 3600).toFixed(0) + '小时';
+        return s + '秒';
+    }
+
+    // 标签页导航
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            tab.classList.add('active');
+            $('tab-' + tab.dataset.tab).classList.add('active');
+        });
+    });
+
+    // 产品管理
+    async function loadProducts() {
+        try {
+            const res = await api('/products');
+            if (res.success) {
+                products = res.data || [];
+                updateProductSelects();
+                renderProductList();
+                toast('已加载 ' + products.length + ' 个产品', 'success');
+            } else {
+                toast(res.message || '加载失败', 'error');
+            }
+        } catch (e) {
+            toast('加载产品列表失败', 'error');
+        }
+    }
+
+    function renderProductList() {
+        const tbody = $('productList');
+        if (products.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-muted">暂无产品</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = products.map(p => `
+            <tr>
+                <td><code>${p.id}</code></td>
+                <td>${p.name}</td>
+                <td>
+                    <button class="btn-sm" onclick="quickGenerate('${p.name}')">快速生成</button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function updateProductSelects() {
+        const options = '<option value="">请选择产品...</option>' +
+            products.map(p => `<option value="${p.name}" data-id="${p.id}">${p.name}</option>`).join('');
+
+        $('genProductSelect').innerHTML = options;
+        $('batchProductSelect').innerHTML = options;
+    }
+
+    async function checkProduct() {
+        const name = $('newProductName').value.trim();
+        if (!name) {
+            toast('请输入产品名称', 'error');
+            return;
+        }
+
+        try {
+            const res = await api('/product/check/' + encodeURIComponent(name));
+            const output = $('checkResult');
+            output.classList.remove('hidden', 'success', 'error');
+            output.classList.add(res.exists ? 'error' : 'success');
+            output.innerHTML = `<pre>${res.exists ? '✗ 产品已存在' : '✓ 名称可用'}</pre>`;
+        } catch (e) {
+            toast('检查失败', 'error');
+        }
+    }
+
+    async function addProduct() {
+        const name = $('newProductName').value.trim();
+        if (!name) {
+            toast('请输入产品名称', 'error');
+            return;
+        }
+
+        try {
+            const res = await api('/product', {
+                method: 'POST',
+                body: JSON.stringify({ name })
+            });
+
+            if (res.success) {
+                toast('产品创建成功：' + name, 'success');
+                $('newProductName').value = '';
+                $('checkResult').classList.add('hidden');
+                loadProducts();
+            } else {
+                toast(res.message || '创建失败', 'error');
+            }
+        } catch (e) {
+            toast('添加产品失败', 'error');
+        }
+    }
+
+    // 生成激活码
+    function setPreset(exp, dur) {
+        $('genExpiration').value = exp;
+        $('genDuration').value = dur;
+        $('batchExpiration').value = exp;
+        $('batchDuration').value = dur;
+        toast(`预设已应用：${formatSeconds(exp)} / ${formatSeconds(dur)}`);
+    }
+
+    async function generateCode() {
+        const select = $('genProductSelect');
+        const byType = $('genByType').value;
+        const expiration = parseInt($('genExpiration').value);
+        const duration = parseInt($('genDuration').value);
+        const amount = parseInt($('genAmount').value);
+
+        if (!select.value) {
+            toast('请选择产品', 'error');
+            return;
+        }
+
+        const selectedOption = select.options[select.selectedIndex];
+        const productId = selectedOption.dataset.id;
+        const productName = select.value;
+
+        let endpoint, body;
+
+        if (byType === 'id') {
+            endpoint = '/code/generate-by-id';
+            body = { productId, expirationPeriod: expiration, activationDuration: duration, amount };
+        } else {
+            endpoint = '/code/generate';
+            body = { productName, expirationPeriod: expiration, activationDuration: duration, amount };
+        }
+
+        try {
+            const res = await api(endpoint, {
+                method: 'POST',
+                body: JSON.stringify(body)
+            });
+
+            const output = $('genResult');
+            output.classList.remove('hidden', 'success', 'error');
+
+            if (res.success) {
+                output.classList.add('success');
+                output.innerHTML = `
+                    <div class="code-item" onclick="copyCode('${res.data.code}')">
+                        <code>${res.data.code}</code>
+                    </div>
+                `;
+                toast('激活码生成成功', 'success');
+            } else {
+                output.classList.add('error');
+                output.innerHTML = `<pre>${res.message || '生成失败'}</pre>`;
+                toast(res.message || '生成失败', 'error');
+            }
+        } catch (e) {
+            toast('生成激活码失败', 'error');
+        }
+    }
+
+    function quickGenerate(productName) {
+        $('genProductSelect').value = productName;
+        document.querySelector('[data-tab="generate"]').click();
+    }
+
+    // 批量生成
+    async function batchGenerate() {
+        const productName = $('batchProductSelect').value;
+        const count = parseInt($('batchCount').value);
+        const expiration = parseInt($('batchExpiration').value);
+        const duration = parseInt($('batchDuration').value);
+        const amount = parseInt($('batchAmount').value);
+
+        if (!productName) {
+            toast('请选择产品', 'error');
+            return;
+        }
+
+        if (count < 1 || count > 100) {
+            toast('数量必须在 1-100 之间', 'error');
+            return;
+        }
+
+        try {
+            const res = await api('/code/batch-generate', {
+                method: 'POST',
+                body: JSON.stringify({
+                    productName,
+                    count,
+                    expirationPeriod: expiration,
+                    activationDuration: duration,
+                    amount
+                })
+            });
+
+            const output = $('batchResult');
+            const codeList = $('batchCodeList');
+            output.classList.remove('hidden', 'success', 'error');
+
+            if (res.success) {
+                generatedCodes = res.data.codes;
+                output.classList.add('success');
+
+                codeList.innerHTML = res.data.codes.map((code, i) => `
+                    <div class="code-item" onclick="copyCode('${code}')">
+                        <span class="text-muted">${String(i + 1).padStart(2, '0')}</span>
+                        <code>${code}</code>
+                    </div>
+                `).join('');
+
+                $('copyAllBtn').classList.remove('hidden');
+                $('downloadBtn').classList.remove('hidden');
+                toast(`成功生成 ${count} 个激活码`, 'success');
+            } else {
+                output.classList.add('error');
+                codeList.innerHTML = `<pre>${res.message || '批量生成失败'}</pre>`;
+                toast(res.message || '批量生成失败', 'error');
+            }
+        } catch (e) {
+            toast('批量生成失败', 'error');
+        }
+    }
+
+    // 复制和下载
+    function copyCode(code) {
+        navigator.clipboard.writeText(code).then(() => {
+            toast('已复制', 'success');
+        }).catch(() => {
+            toast('复制失败', 'error');
+        });
+    }
+
+    function copyAllCodes() {
+        navigator.clipboard.writeText(generatedCodes.join('\n')).then(() => {
+            toast('所有激活码已复制', 'success');
+        }).catch(() => {
+            toast('复制失败', 'error');
+        });
+    }
+
+    function downloadCodes() {
+        const productName = $('batchProductSelect').value || 'codes';
+        const content = generatedCodes.join('\n');
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${productName}_${new Date().toISOString().slice(0,10)}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast('下载成功', 'success');
+    }
+
+    // 初始化
+    window.addEventListener('DOMContentLoaded', () => {
+        loadProducts();
+        $('statusDot').classList.add('online');
+    });
+
+    // 回车键快捷操作
+    $('newProductName').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') addProduct();
+    });
+</script>
+</body>
+</html>

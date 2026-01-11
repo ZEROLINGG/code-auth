@@ -5,4 +5,7 @@ export const CONFIG = {
     TIMESTAMP_TOLERANCE_MS: 60 * 1000,       // 时间戳容差
     MAX_QUANTITY: 100,                       // 单次最大生成数量
     MAX_VALIDITY_SECONDS: 365 * 24 * 60 * 60, // 最大有效期1年
+
+
+    ServerBaseTimestamp: 1766000000
 } as const;

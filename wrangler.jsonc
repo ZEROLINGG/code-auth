@@ -21,8 +21,17 @@
 		}
 	],
 	"vars": {
-		"SERVER_KEY": ""
-	}
+		"SERVER_KEY": "",
+		"SUPER_ADMIN_IP": "",
+		"SUPER_ADMIN_KEY": ""
+	},
+	"rules": [
+		{
+			"type": "Text",
+			"globs": ["**/*.html"],
+			"fallthrough": true
+		}
+	]
 
 	/**
 	 * Smart Placement
