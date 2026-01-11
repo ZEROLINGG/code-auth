@@ -46,7 +46,7 @@ if ($envVars.ContainsKey("SUPER_ADMIN_IP")) {
 foreach ($key in $envVars.Keys) {
     $value = $envVars[$key]
     Write-Host "上传 secret: $key" -ForegroundColor Cyan
-    wrangler secret put $key -b $value
+    $value | wrangler secret put $key
 }
 
 
