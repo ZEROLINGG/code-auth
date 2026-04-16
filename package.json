@@ -1,0 +1,7 @@
+{
+  "name": "code-auth",
+  "private": true,
+  "scripts": {
+    "sdk-wasm-dev": "cd sdk/server/wasm && wasm-pack test --chrome"
+  }
+}
