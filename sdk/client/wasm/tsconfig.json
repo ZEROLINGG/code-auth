@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2015",          // 输出兼容浏览器的 JS
+    "module": "ESNext",          // 使用 ES 模块导入
+    "lib": ["DOM", "ES2022"],    // 支持 Symbol.dispose 等现代符号
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["wasm/**/*", "src/**/*"]
+}
