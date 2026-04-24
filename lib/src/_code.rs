@@ -1,6 +1,6 @@
-// src/_code.rs
+// lib/src/_code.rs
 
-use crate::aes::{Aes128Gcm, Aes256Gcm, Cipher as _};
+use crate::aead::{Aes128Gcm, Aes256Gcm, Cipher as _};
 use crate::base::{Base91,Encoder as _};
 
 
@@ -370,6 +370,5 @@ impl V2 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
 }

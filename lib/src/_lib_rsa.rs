@@ -1,6 +1,20 @@
-// src/binary_data_process/z_rsa.rs
+// lib/src/_lib_rsa.rs
 
-use rsa::{RsaPrivateKey, RsaPublicKey};
+use rsa::{BigUint, RsaPrivateKey, RsaPublicKey};
+use rsa::traits::PublicKeyParts;
+use rsa::pkcs8::DecodePublicKey;
+
+pub fn check_pubkey(bytes: &[u8]) -> bool {
+    let key = match RsaPublicKey::from_public_key_der(bytes) {
+        Ok(k) => k,
+        Err(_) => return false,
+    };
+    let n_bits = key.n().bits();
+    if !(2048..=8192).contains(&n_bits) {
+        return false;
+    }
+    key.e() == &BigUint::from(65537u32)
+}
 
 // ─── Trait 定义 ───────────────────────────────────────────────────────────────
 
@@ -11,6 +25,7 @@ pub trait AsymmetricCipher {
     fn decrypt<T: AsRef<[u8]>>(private_key: &[u8], ciphertext: T) -> Option<Vec<u8>>;
     fn sign<T: AsRef<[u8]>>(private_key: &[u8], message: T) -> Option<Vec<u8>>;
     fn verify<T: AsRef<[u8]>>(public_key: &[u8], message: T, signature: &[u8]) -> bool;
+
 }
 
 // ─── DER 解析辅助宏 ───────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
-﻿import {CONFIG} from "../config";
-import {RSA} from "./rsa";
+﻿import {rsa2048_generate_keypair} from "./pkg";
+import {Context} from "hono";
 
 export function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -7,6 +7,48 @@ export function sleep(ms: number): Promise<void> {
 export function randomInt(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
+export function random_bytes(length: number): Uint8Array | null {
+    try {
+        if (length < 0 || !Number.isInteger(length)) {
+            return null;
+        }
+        const bytes = new Uint8Array(length);
+        crypto.getRandomValues(bytes);
+        return bytes;
+    } catch {
+        return null;
+    }
+}
+
+export function random_u8(): number {
+    const bytes = new Uint8Array(1);
+    crypto.getRandomValues(bytes);
+    return bytes[0];
+}
+
+export function random_u16(): number {
+    const bytes = new Uint8Array(2);
+    crypto.getRandomValues(bytes);
+    const view = new DataView(bytes.buffer);
+    return view.getUint16(0, true); // little-endian
+}
+
+export function random_u32(): number {
+    const bytes = new Uint8Array(4);
+    crypto.getRandomValues(bytes);
+    const view = new DataView(bytes.buffer);
+    return view.getUint32(0, true); // little-endian
+}
+
+export function random_u64(): bigint {
+    const bytes = new Uint8Array(8);
+    crypto.getRandomValues(bytes);
+    const view = new DataView(bytes.buffer);
+    const lo = BigInt(view.getUint32(0, true));
+    const hi = BigInt(view.getUint32(4, true));
+    return (hi << 32n) | lo;
+}
+
 
 export class kvLock {
     /**
@@ -42,7 +84,7 @@ export class kvLock {
         kv: KVNamespace,
         name: string,
         wait: number = 30 * 1000,
-        retryDelay: number = 100
+        retryDelay: number = 2000
     ): Promise<boolean> {
         const start = Date.now();
 
@@ -89,59 +131,70 @@ export function generateUUID(): string {
  * 这些密钥用于加密客户端和服务器之间的通信。
  */
 export async function ensureRSAKeys(kv: KVNamespace): Promise<void> {
-    const existingPubKey = await kv.get('rsa_pub_key_pem');
-    // 如果公钥不存在，说明需要重新生成密钥对
-    if (!existingPubKey) {
-        const keyPair = await RSA.generateRSAKeyPair();
-        const pubKeyPem = await RSA.exportPublicKeyPEM(keyPair.publicKey);
-        const priKeyPem = await RSA.exportPrivateKeyPEM(keyPair.privateKey);
+    const existingPubKey = await kv.get('rsa_pub_key');
+    const existingPriKey = await kv.get('rsa_pri_key');
+    if (!existingPubKey || !existingPriKey) {
+        const keyPair = rsa2048_generate_keypair();
+        if (!keyPair) {
+            throw Error("rsa2048_generate_keypair: 失败")
+        }
+        await kv.put("rsa_pub_key", keyPair.public_key);
+        await kv.put("rsa_pri_key", keyPair.private_key);
 
-        await kv.put('rsa_pub_key_pem', pubKeyPem, { expirationTtl: CONFIG.RSA_KEY_UPDATE_TIME });
-        await kv.put('rsa_pri_key_pem', priKeyPem, { expirationTtl: CONFIG.RSA_KEY_UPDATE_TIME });
     }
+    // const existingPubKey = await kv.get('rsa_pub_key_pem');
+    // // 如果公钥不存在，说明需要重新生成密钥对
+    // if (!existingPubKey) {
+    //     const keyPair = await RSA.generateRSAKeyPair();
+    //     const pubKeyPem = await RSA.exportPublicKeyPEM(keyPair.publicKey);
+    //     const priKeyPem = await RSA.exportPrivateKeyPEM(keyPair.privateKey);
+    //
+    //     await kv.put('rsa_pub_key_pem', pubKeyPem, { expirationTtl: CONFIG.RSA_KEY_UPDATE_TIME });
+    //     await kv.put('rsa_pri_key_pem', priKeyPem, { expirationTtl: CONFIG.RSA_KEY_UPDATE_TIME });
+    // }
 }
 
 /**
  * 获取客户端真实 IP 地址
  * 兼容 Cloudflare Workers 标准头和常见的代理头
  */
-export function getClientIP(request: Request): string {
-    return request.headers.get('CF-Connecting-IP') || // Cloudflare 提供的最准确 IP
-        request.headers.get('X-Real-IP') ||
-        request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ||
+export function getClientIP(c: Context): string {
+    return c.req.header('CF-Connecting-IP') ||
+        c.req.header('X-Real-IP') ||
+        c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ||
         '0.0.0.0';
 }
 
-export const serverT = {
-    now: (): number => {
-        const nowMs = Date.now();
-        return Math.floor(nowMs / 1000) - CONFIG.ServerBaseTimestamp; // 秒级相对时间
-    },
-    toDate: (T: number): Date => {
-        return new Date((T + CONFIG.ServerBaseTimestamp) * 1000);
-    },
-    fromDate: (date: Date): number => {
-        return Math.floor(date.getTime() / 1000) - CONFIG.ServerBaseTimestamp;
-    }
-};
+// export const serverT = {
+//     now: (): number => {
+//         const nowMs = Date.now();
+//         return Math.floor(nowMs / 1000) - CONFIG.ServerBaseTimestamp; // 秒级相对时间
+//     },
+//     toDate: (T: number): Date => {
+//         return new Date((T + CONFIG.ServerBaseTimestamp) * 1000);
+//     },
+//     fromDate: (date: Date): number => {
+//         return Math.floor(date.getTime() / 1000) - CONFIG.ServerBaseTimestamp;
+//     }
+// };
 
-export async function authSuperAdmin(
-    request: Request,
-    SUPER_ADMIN_KEY: string,
-    adminIp: string
-): Promise<boolean> {
-    // 1. 验证 Admin Key (通过自定义头 X-Authorization-A 传递)
-    const xAuth = request.headers.get('X-Authorization-A') || '';
-    if (!xAuth || xAuth !== SUPER_ADMIN_KEY) {
-        console.log('Admin auth failed: Invalid key');
-        return false;
-    }
-
-    const clientIp = getClientIP(request);
-    // 3. IP 白名单验证
-    // adminIp 可以是单个 IP 或逗号分隔的多个 IP (如 "1.1.1.1, 2.2.2.2")
-    const allowedIPs = adminIp.split(',').map(ip => ip.trim());
-    return allowedIPs.includes(clientIp);
-}
+// export async function authSuperAdmin(
+//     request: Request,
+//     SUPER_ADMIN_KEY: string,
+//     adminIp: string
+// ): Promise<boolean> {
+//     // 1. 验证 Admin Key (通过自定义头 X-Authorization-A 传递)
+//     const xAuth = request.headers.get('X-Authorization-A') || '';
+//     if (!xAuth || xAuth !== SUPER_ADMIN_KEY) {
+//         console.log('Admin auth failed: Invalid key');
+//         return false;
+//     }
+//
+//     const clientIp = getClientIP(request);
+//     // 3. IP 白名单验证
+//     // adminIp 可以是单个 IP 或逗号分隔的多个 IP (如 "1.1.1.1, 2.2.2.2")
+//     const allowedIPs = adminIp.split(',').map(ip => ip.trim());
+//     return allowedIPs.includes(clientIp);
+// }
 
 

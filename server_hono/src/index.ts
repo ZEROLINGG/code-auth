@@ -3,17 +3,30 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import api from "./routes/api";
 import superAdmin, {authSuperAdmin} from "./routes/superAdmin";
-import {getClientIP} from "./tool/tool";
+import init from "./tool/pkg/wasm.js";
+import wasm from "./tool/pkg/wasm_bg.wasm";
+import {handleLogQueue, initLog, LogEnv, QueueMessage} from "./tool/log"
 
 
 // 指定 Worker 绑定类型
 const app = new Hono<{ Bindings: CloudflareBindings }>();
 
+let wasmReady: Promise<void> | null = null;
+function initWasm() {
+  if (!wasmReady) {
+    wasmReady = (async () => {
+      await init(wasm);
+    })();
+  }
+  return wasmReady;
+}
+
 app.use("*", async (c, next) => {
   if (!c.env.SERVER_KEY || !c.env.SUPER_ADMIN_IP || !c.env.SUPER_ADMIN_KEY) {
     return c.text("Server configuration error", 500);
   }
-
+  await initWasm();
+  await initLog(c.env.AUTH_DB, c.env.LOG_QUEUE);
   await next();
 });
 app.use('*', cors({
@@ -22,10 +35,11 @@ app.use('*', cors({
     'http://127.0.0.1',
     'http://localhost:1420',
     'http://tauri.localhost',
+    'http://127.0.0.1:8000'
   ],
   credentials: true,
   allowMethods: ['GET', 'POST', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'X-Authorization-A'],
+  allowHeaders: ['Content-Type', 'X-Authorization-A', 'Service'],
 }));
 app.use('*', secureHeaders({
   xContentTypeOptions: 'nosniff', // 防止浏览器嗅探 MIME 类型
@@ -50,4 +64,10 @@ app.post("*", async (c) => {
 });
 
 
-export default app;
+export default {
+  fetch: app.fetch.bind(app),
+
+  async queue(batch: MessageBatch<QueueMessage>, env: LogEnv): Promise<void> {
+    await handleLogQueue(batch, env);
+  }
+};

@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-aes-gcm = "0.10"
+aes-gcm = { version = "0.10", features = ["std"] }
+aes-gcm-siv = "0.11"
+chacha20poly1305 = "0.10"
 rand = "0.8"
 lz4_flex    = "0.13"
 flate2      = "1.1"
@@ -13,6 +15,17 @@ rsa         = "0.9"
 sha2         = "0.10"
 hex = "0.4.3"
 blake3 = "1.8.4"
+pbkdf2 = { version = "0.12", features = ["simple"] }
+argon2 = "0.5"
+scrypt = "0.11"
+hkdf = "0.12"
+
+p256 = { version = "0.13", features = ["ecdh"] }
+p384 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+k256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+
+
+
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"

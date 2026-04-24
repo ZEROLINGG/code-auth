@@ -27,10 +27,15 @@ console_error_panic_hook = { version = "0.1.6", optional = true }
 wee_alloc = { version = "0.4.5", optional = true }
 
 lib = {path = "../../../lib"}
+paste = "1"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.13"
 
 [profile.release]
 # Tell `rustc` to optimize for small code size.
-opt-level = "s"
+opt-level = 3
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"

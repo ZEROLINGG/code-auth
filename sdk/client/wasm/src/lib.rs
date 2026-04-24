@@ -1,18 +1,16 @@
+// sdk/client/wasm/src/lib.rs
 
-// mod a_rsa;
-// mod a_aes;
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
-// use base64::{engine::general_purpose, Engine as _};
-// use serde::Serialize;
-// use wasm_bindgen_futures::JsFuture;
-// use web_sys::{Request, RequestInit, Response, Headers};
-// use serde_json::Value;
-// use crate::a_aes::Aes;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{Request, RequestInit, Response, Headers};
+use serde_json::Value;
 
-use lib::*;
-use lib::aes::*;
-use lib::compress::Compressor;
-use lib::hash::Hasher;
+use lib::base::{Base91,Base85,Encoder};
+use lib::{code, kdf};
+use lib::aead::{Aes256Gcm, Aes256GcmSiv, Cipher};
+use lib::kdf::Kdf;
+use lib::rsa::{AsymmetricCipher, Rsa2048};
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -20,453 +18,621 @@ use lib::hash::Hasher;
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-#[wasm_bindgen]
-extern {
-    fn alert(s: &str);
 
+// sdk/client/wasm/src/lib.rs
+
+const SERVICE: &str = "auth-1.0.1";
+
+
+pub async fn post_json(
+    url: &str,
+    body: &Value,
+    extra_headers: Option<Vec<(String, String)>>,
+) -> Result<Value, String> {
+    let opts = RequestInit::new();
+    opts.set_method("POST");
+
+    let headers = Headers::new()
+        .map_err(|_| "Failed to create headers".to_string())?;
+    headers.set("Content-Type", "application/json")
+        .map_err(|_| "Failed to set Content-Type".to_string())?;
+
+    headers.set("Service", SERVICE)
+        .map_err(|_| format!("Failed to set header: {}", "Service"))?;
+    if let Some(extra) = extra_headers {
+        for (key, value) in extra {
+            headers.set(&key, &value)
+                .map_err(|_| format!("Failed to set header: {}", key))?;
+        }
+    }
+
+    opts.set_headers(&headers);
+
+    let body_str = serde_json::to_string(body)
+        .map_err(|e| format!("Failed to serialize body: {}", e))?;
+
+    opts.set_body(&JsValue::from_str(&body_str));
+
+    let request = Request::new_with_str_and_init(url, &opts)
+        .map_err(|_| "Failed to create request".to_string())?;
+
+    let window = web_sys::window()
+        .ok_or_else(|| "No window object".to_string())?;
+
+    let resp_value = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|_| "Fetch failed".to_string())?;
+
+    let resp: Response = resp_value
+        .dyn_into()
+        .map_err(|_| "Invalid response object".to_string())?;
+
+    let json_promise = resp.json()
+        .map_err(|_| "Failed to get json promise".to_string())?;
+
+    let json = JsFuture::from(json_promise)
+        .await
+        .map_err(|_| "Failed to parse JSON".to_string())?;
+
+    let result: Value = serde_wasm_bindgen::from_value(json)
+        .map_err(|e| format!("Failed to convert value: {}", e))?;
+
+    Ok(result)
 }
 
 
 
-#[wasm_bindgen]
-pub fn greet() {
-    let aaa = Aes256Gcm::encrypt(&[0x7Eu8; 32], "WASM").unwrap();
-    alert(&format!("Hello from Rust {:?}", compress::Zstd::decompress(&*compress::Zstd::compress(aaa.clone()).unwrap())));
-    alert(&format!("Hello from Rust {}", hash::Blake3::digest_hex(aaa.clone())));
-    let c = code::V1::generate(&[0x7Eu8; 32], 1234, 360, 360, 1, None).unwrap();
+/// 从响应中提取 data 字段
 
-    alert(&format!("{:?}", code::V1::verify_and_parse(&[0x7Eu8; 32],&c,1234,None)));
+fn extract_data(resp: &Value) -> Result<Value, String> {
+    let success = resp
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .ok_or("Missing or invalid 'success' field")?;
 
+    if !success {
+        let message = resp
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown error");
+        return Err(message.to_string());
+    }
+    resp.get("data")
+        .cloned()
+        .ok_or("Missing 'data' field in response".to_string())
 }
 
-// pub async fn post_json(
-//     url: &str,
-//     body: &Value,
-//     extra_headers: Option<Vec<(String, String)>>,
-// ) -> Result<Value, JsValue> {
-//     let opts = RequestInit::new();
-//
-//     opts.set_method("POST");
-//
-//     let headers = Headers::new()?;
-//     headers.set("Content-Type", "application/json")?;
-//
-//     if let Some(extra) = extra_headers {
-//         for (key, value) in extra {
-//             headers.set(&key, &value)?;
-//         }
-//     }
-//
-//     opts.set_headers(&headers);
-//
-//     let body_str = serde_json::to_string(body)
-//         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-//
-//     opts.set_body(&JsValue::from_str(&body_str));
-//
-//     let request = Request::new_with_str_and_init(url, &opts)?;
-//
-//     let window = web_sys::window()
-//         .ok_or_else(|| JsValue::from_str("No window object"))?;
-//
-//     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
-//     let resp: Response = resp_value.dyn_into()?;
-//
-//     let json_promise = resp.json()?;
-//     let json = JsFuture::from(json_promise).await?;
-//     let result: Value = serde_wasm_bindgen::from_value(json)?;
-//
-//     Ok(result)
-// }
-//
-// #[derive(Serialize)]
-// pub struct AuthResult {
-//     success: bool,
-//     license: Option<String>,
-// }
-// #[derive(serde::Serialize)]
-// pub struct CodeInfo {
-//     success: bool,
-//     code_expire_at: i64,
-//     activation_duration: i64,
-//     max_amount: i64,
-// }
-//
-// #[wasm_bindgen]
-// pub struct Auth {
-//     product_id: String,
-//     binding: String,
-//     license: Option<String>,
-//     server_pub_pem: Option<String>,
-//     client_pub_pem: Option<String>,
-//     client_pri_pem: Option<String>,
-//     client_uuid: Option<String>,
-//     aes: Option<Aes>
-//
-// }
-//
-// const API_BASE_URL: &str = "https://auth.808050.xyz/api";
-// const SERVER_BASE_TS: i64 = 1768276281;
-//
-// fn auth_result(success: bool, license: Option<String>) -> Result<JsValue, JsValue> {
-//     serde_wasm_bindgen::to_value(&AuthResult { success, license })
-//         .map_err(|e| JsValue::from_str(&e.to_string()))
-// }
-//
-//
-// #[wasm_bindgen]
-// impl Auth {
-//     #[wasm_bindgen(constructor)]
-//     pub fn new(product_id: String, binding: String,license: Option<String>) -> Auth {
-//         Auth {
-//             product_id,
-//             binding,
-//             license,
-//             server_pub_pem: None,
-//             client_pub_pem: None,
-//             client_pri_pem: None,
-//             client_uuid: None,
-//             aes: None,
-//         }
-//     }
-//     /// 检查许可证是否有效
-//     pub async fn check(&self) -> Result<JsValue, JsValue> {
-//         // 1. 基础校验
-//         let license = self.license.clone().ok_or_else(|| {
-//             JsValue::from_str("[Auth::check] License not found")
-//         })?;
-//
-//         let aes = self.aes.as_ref().ok_or_else(|| {
-//             JsValue::from_str("[Auth::check] AES not initialized")
-//         })?;
-//
-//         let client_uuid = self.client_uuid.clone().ok_or_else(|| {
-//             JsValue::from_str("[Auth::check] Client UUID not initialized")
-//         })?;
-//
-//         let server_pub_pem = self.server_pub_pem.clone().ok_or_else(|| {
-//             JsValue::from_str("[Auth::check] Server public key not found")
-//         })?;
-//
-//         let client_pri_pem = self.client_pri_pem.clone().ok_or_else(|| {
-//             JsValue::from_str("[Auth::check] Client private key not found")
-//         })?;
-//
-//         // 2. AES 解密 license
-//         let decrypted = aes.decrypt_b64_to_string(&license)
-//             .map_err(|e| JsValue::from_str(&format!("License decrypt failed: {}", e)))?;
-//
-//         // 3. 解析 JSON
-//         // [success, activation_uuid, code_expire, use_expire, binding_hash, remaining]
-//         let value: Value = serde_json::from_str(&decrypted)
-//             .map_err(|e| JsValue::from_str(&format!("Invalid license JSON: {}", e)))?;
-//
-//         let activation_uuid = value.get(1)
-//             .and_then(|v| v.as_str())
-//             .ok_or_else(|| JsValue::from_str("Missing activation_uuid"))?;
-//
-//         let binding_hash = value.get(4)
-//             .and_then(|v| v.as_str())
-//             .ok_or_else(|| JsValue::from_str("Missing binding_hash"))?;
-//
-//         // 4. RSA 加密请求数据
-//         let enc_activation_uuid = a_rsa::RSA::encrypt(activation_uuid, &server_pub_pem)
-//             .map_err(|e| JsValue::from_str(&format!("Encrypt error: {}", e)))?;
-//
-//         let enc_binding_hash = a_rsa::RSA::encrypt(binding_hash, &server_pub_pem)
-//             .map_err(|e| JsValue::from_str(&format!("Encrypt error: {}", e)))?;
-//
-//         // 5. 构建请求体
-//         let request_body = serde_json::json!({
-//         "client_uuid": client_uuid,
-//         "data_u": enc_activation_uuid,
-//         "data_b": enc_binding_hash,
-//     });
-//
-//         // 6. 请求服务器
-//         let url = format!("{}/auth/again/reg/code", API_BASE_URL);
-//         let response = post_json(&url, &request_body, None).await?;
-//
-//         let status = response.get("status")
-//             .and_then(|v| v.as_str())
-//             .unwrap_or("error");
-//
-//         if status != "ok" {
-//             let message = response.get("message")
-//                 .and_then(|v| v.as_str())
-//                 .unwrap_or("Unknown error");
-//             let code = response.get("code")
-//                 .and_then(|v| v.as_i64())
-//                 .unwrap_or(400);
-//             return Err(JsValue::from_str(
-//                 &format!("[Auth::check] API error: {} (code: {})", message, code)
-//             ));
-//         }
-//
-//         // 7. 解密返回数据
-//         let data_array = response.get("data")
-//             .and_then(|v| v.as_array())
-//             .ok_or_else(|| JsValue::from_str("Missing 'data' in response"))?;
-//
-//         let mut decrypted_resp = String::new();
-//         for item in data_array {
-//             if let Some(enc_str) = item.as_str() {
-//                 let chunk = a_rsa::RSA::decrypt_to_string(enc_str, &client_pri_pem)
-//                     .map_err(|e| JsValue::from_str(&format!("Decrypt error: {}", e)))?;
-//                 decrypted_resp.push_str(&chunk);
-//             }
-//         }
-//
-//         let result: Value = serde_json::from_str(&decrypted_resp)
-//             .map_err(|e| JsValue::from_str(&format!("Invalid JSON: {}", e)))?;
-//
-//         let success = result.get(0)
-//             .and_then(|v| v.as_bool())
-//             .unwrap_or(false);
-//
-//         if !success {
-//             return auth_result(false, None);
-//         }
-//
-//         // 8. 重新加密并返回新的 license
-//         let new_license = aes.encrypt_to_b64(&decrypted_resp)
-//             .map_err(|e| JsValue::from_str(&e))?;
-//
-//         auth_result(true, Some(new_license))
-//     }
-//
-//     /// 激活授权返回许可证
-//     pub async fn auth(&mut self, code: String) ->  Result<JsValue, JsValue> {
-//         // 返回license
-//         if !self.is_initialized() {
-//             self.init().await?;
-//         }
-//         let client_uuid = self.client_uuid.clone().ok_or_else(|| {
-//             JsValue::from_str("[Auth::auth] Client UUID not initialized")
-//         })?;
-//
-//         let client_pri_pem = self.client_pri_pem.clone().ok_or_else(|| {
-//             JsValue::from_str("[Auth::auth] Client private key not found")
-//         })?;
-//
-//         let server_pub_pem = self.server_pub_pem.clone().ok_or_else(|| {
-//             JsValue::from_str("[Auth::auth] Server public key not found")
-//         })?;
-//
-//         // 构建带时间戳的数据
-//         let timestamp = js_sys::Date::now() as i64;
-//         let data_c = format!("{}:{}", code, timestamp);
-//
-//         // 使用服务器公钥加密数据
-//         let enc_data_c = a_rsa::RSA::encrypt(&data_c, &server_pub_pem)
-//             .map_err(|e| JsValue::from_str(&format!("Encrypt error: {}", e)))?;
-//
-//         let enc_product_id = a_rsa::RSA::encrypt(&self.product_id, &server_pub_pem)
-//             .map_err(|e| JsValue::from_str(&format!("Encrypt error: {}", e)))?;
-//
-//         let enc_binding = a_rsa::RSA::encrypt(&self.binding, &server_pub_pem)
-//             .map_err(|e| JsValue::from_str(&format!("Encrypt error: {}", e)))?;
-//
-//         // 构建请求体
-//         let request_body = serde_json::json!({
-//             "client_uuid": client_uuid,
-//             "data_c": enc_data_c,
-//             "data_i": enc_product_id,
-//             "data_b": enc_binding,
-//         });
-//
-//         // 调用服务器核心验证接口
-//         let url = format!("{}/auth/reg/code", API_BASE_URL);
-//         let response = post_json(&url, &request_body, None).await?;
-//
-//         // 检查返回状态
-//         let status = response.get("status")
-//             .and_then(|v| v.as_str())
-//             .unwrap_or("error");
-//
-//         if status != "ok" {
-//             let message = response.get("message")
-//                 .and_then(|v| v.as_str())
-//                 .unwrap_or("Unknown error");
-//             let code = response.get("code")
-//                 .and_then(|v| v.as_i64())
-//                 .unwrap_or(400);
-//             return Err(JsValue::from_str(&format!("[Auth::auth] API error: {} (code: {})", message, code)));
-//         }
-//
-//         // 解密返回数据
-//         let data_array = response.get("data")
-//             .and_then(|v| v.as_array())
-//             .ok_or_else(|| JsValue::from_str("Missing 'data' in response"))?;
-//
-//         let mut decrypted = String::new();
-//         for item in data_array {
-//             if let Some(enc_str) = item.as_str() {
-//                 let chunk = a_rsa::RSA::decrypt_to_string(enc_str, &client_pri_pem)
-//                     .map_err(|e| JsValue::from_str(&format!("Decrypt error: {}", e)))?;
-//                 decrypted.push_str(&chunk);
-//             }
-//         }
-//
-//         // 返回解析后的 JSON 字符串
-//         // [true,"522dd1d1-c4e7-4307-a941-530ef4e505f7",31658502,315482535,"1eddeb9444fa9f65dfcac9958d1cef158a7808a00ff76fd6962320d9da26fe0b",4]
-//         let value: Value = serde_json::from_str(&decrypted)
-//             .map_err(|e| JsValue::from_str(&format!("Invalid JSON: {}", e)))?;
-//
-//         let success = value
-//             .get(0)
-//             .and_then(|v| v.as_bool())
-//             .unwrap_or(false);
-//
-//         if !success {
-//             return auth_result(false, None);
-//         }
-//
-//         let aes = self.aes.as_ref().ok_or_else(|| {
-//             JsValue::from_str("AES not initialized")
-//         })?;
-//         auth_result(
-//             true,
-//             Some(aes.encrypt_to_b64(&decrypted)
-//                 .map_err(|e| JsValue::from_str(&e))?
-//             ),
-//         )
-//
-//     }
-//
-//     /// 获取客户端UUID
-//     fn client_uuid(&self) -> Option<String> {
-//         self.client_uuid.clone()
-//     }
-//
-//     /// 检查是否已初始化
-//     #[wasm_bindgen(getter)]
-//     pub fn is_initialized(&self) -> bool {
-//         self.client_uuid.is_some() && self.server_pub_pem.is_some()
-//     }
-//
-//     /// 初始化
-//     pub async fn init(&mut self) -> Result<(), JsValue> {
-//         // 1. 生成客户端 RSA 密钥对 (2048位)
-//         let (client_pri_key, client_pub_key) = a_rsa::RSA::generate_rsa_key_pair()
-//             .map_err(|e| JsValue::from_str(&format!("Failed to generate RSA key pair: {}", e)))?;
-//
-//         // 2. 导出为 PEM 格式
-//         let client_pub_pem = a_rsa::RSA::export_public_key_pem(&client_pub_key)
-//             .map_err(|e| JsValue::from_str(&format!("Failed to export public key: {}", e)))?;
-//         let client_pri_pem = a_rsa::RSA::export_private_key_pem(&client_pri_key)
-//             .map_err(|e| JsValue::from_str(&format!("Failed to export private key: {}", e)))?;
-//
-//         // 3. 构建请求体
-//         let request_body = serde_json::json!({
-//             "client_pub_key_pem": client_pub_pem
-//         });
-//
-//         // 4. 发送密钥交换请求
-//         let url = format!("{}/pub/key/exc", API_BASE_URL);
-//         let response = post_json(&url, &request_body, None).await?;
-//
-//         // 5. 检查响应状态 - 根据服务器格式
-//         // 成功: { "status": "ok", "client_uuid": "...", "server_pub_key_pem": "..." }
-//         // 失败: { "status": "error", "message": "...", "code": 400 }
-//
-//         let status = response.get("status")
-//             .and_then(|v| v.as_str())
-//             .unwrap_or("error");
-//
-//         if status != "ok" {
-//             let message = response.get("message")
-//                 .and_then(|v| v.as_str())
-//                 .unwrap_or("Unknown error");
-//             let code = response.get("code")
-//                 .and_then(|v| v.as_i64())
-//                 .unwrap_or(400);
-//             return Err(JsValue::from_str(&format!("[Auth::init] API error: {} (code: {})", message, code)));
-//         }
-//
-//
-//         // 6. 解析响应数据
-//         let client_uuid = response.get("client_uuid")
-//             .and_then(|v| v.as_str())
-//             .ok_or_else(|| JsValue::from_str("Missing 'client_uuid' in response"))?
-//             .to_string();
-//
-//         let server_pub_pem = response.get("server_pub_key_pem")
-//             .and_then(|v| v.as_str())
-//             .ok_or_else(|| JsValue::from_str("Missing 'server_pub_key_pem' in response"))?
-//             .to_string();
-//
-//
-//         // 7. 验证服务器公钥格式
-//         a_rsa::RSA::import_public_key_pem(&server_pub_pem)
-//             .map_err(|e| JsValue::from_str(&format!("Invalid server public key: {}", e)))?;
-//
-//         // 8. 保存所有密钥信息
-//         self.server_pub_pem = Some(server_pub_pem);
-//         self.client_pub_pem = Some(client_pub_pem);
-//         self.client_pri_pem = Some(client_pri_pem);
-//         self.client_uuid = Some(client_uuid.clone());
-//
-//         self.init_aes()?;
-//         Ok(())
-//     }
-//
-//     fn init_aes(&mut self) -> Result<(), JsValue> {
-//         if self.aes.is_none() {
-//             let key1 = Aes::derive_key(&self.product_id);
-//             let key2 = Aes::derive_key(&self.binding);
-//             let mut key = [0u8; 64];
-//             key[..32].copy_from_slice(&key1);
-//             key[32..].copy_from_slice(&key2);
-//             let key = Aes::derive_key(&key);
-//             let aes = Aes::new(&key)
-//                 .map_err(|e| JsValue::from_str(&format!("AES init failed: {}", e)))?;
-//             self.aes = Some(aes);
-//         }
-//         Ok(())
-//     }
-//
-//     /// 解析激活码信息，返回 code 元信息
-//     pub fn info(&mut self, code: String) -> Result<JsValue, JsValue> {
-//         let mut result = CodeInfo {
-//             success: false,
-//             code_expire_at: 0,
-//             activation_duration: 0,
-//             max_amount: 0,
-//         };
-//         if let Ok(raw) = general_purpose::STANDARD.decode(&code) {
-//             if raw.len() >= 2 {
-//                 let cipher_len = ((raw[0] as usize) << 8) | raw[1] as usize;
-//                 if raw.len() >= 2 + cipher_len {
-//                     let suffix = &raw[2 + cipher_len..];
-//                     if let Ok(suffix_str) = std::str::from_utf8(suffix) {
-//                         if suffix_str.starts_with(':') {
-//                             let parts: Vec<&str> = suffix_str.split(':').collect();
-//                             if parts.len() == 4 && parts[0] == "" {
-//                                 if let (Ok(code_expire_at), Ok(activation_duration), Ok(max_amount)) = (
-//                                     parts[1].parse::<i64>(),
-//                                     parts[2].parse::<i64>(),
-//                                     parts[3].parse::<i64>(),
-//                                 ) {
-//                                     let real_ts_ms = (code_expire_at + SERVER_BASE_TS) * 1000;
-//                                     result = CodeInfo {
-//                                         success: true,
-//                                         code_expire_at: real_ts_ms,
-//                                         activation_duration,
-//                                         max_amount,
-//                                     };
-//                                 }
-//                             }
-//                         }
-//                     }
-//                 }
-//             }
-//         }
-//         serde_wasm_bindgen::to_value(&result)
-//             .map_err(|e| JsValue::from_str(&e.to_string()))
-//     }
-//
-//
-//
-//
-// }
+
+pub async fn _key_exc(api_base_url: &str) -> Result<([u8; 32], String), String> {
+    // ====================== 阶段 1: exc1 ======================
+    let (client_pub_der, client_pri_der) = Rsa2048::generate_keypair()
+        .ok_or("Failed to generate RSA2048 keypair")?;
+
+    let client_pub_base91 = Base91::encode(&client_pub_der);
+
+    let body1 = serde_json::json!({
+        "data": client_pub_base91
+    });
+
+    let resp1 = post_json(
+        &format!("{}/pub/key/exc1", api_base_url),
+        &body1,
+        None,
+    )
+        .await?;
+
+    // 再提取数据
+    let data = extract_data(&resp1)?;
+
+    let client_uuid = data
+        .get("client_uuid")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing 'client_uuid' in exc1 response")?
+        .to_string();
+
+    let server_pub_base91 = data
+        .get("data")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing server pubkey in exc1 response")?;
+
+    let server_pub_der = Base91::decode(server_pub_base91)
+        .ok_or("Failed to base91 decode server public key")?;
+
+    // ====================== 阶段 2: exc2 ======================
+    let k1 = rand::random::<[u8; 16]>().to_vec();
+
+    let encrypted_k1 = Rsa2048::encrypt(&server_pub_der, &k1)
+        .ok_or("RSA encrypt failed")?;
+
+    let body2 = serde_json::json!({
+        "client_uuid": client_uuid,
+        "data": Base91::encode(&encrypted_k1)
+    });
+
+    let resp2 = post_json(
+        &format!("{}/pub/key/exc2", api_base_url),
+        &body2,
+        None,
+    )
+        .await?;
+
+
+    // 再提取数据
+    let data = extract_data(&resp2)?;
+
+    let encrypted_session_base91 = data
+        .get("data")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing 'data' in exc2 response")?;
+
+    let encrypted_session = Base91::decode(encrypted_session_base91)
+        .ok_or("Failed to base91 decode encrypted session key")?;
+
+    let session_key_vec = Rsa2048::decrypt(&client_pri_der, &encrypted_session)
+        .ok_or("Failed to decrypt session key with client private key")?;
+
+    if session_key_vec.len() != 32 {
+        return Err(format!(
+            "Invalid session key length: expected 32, got {}",
+            session_key_vec.len()
+        ));
+    }
+
+    let mut session_key = [0u8; 32];
+    session_key.copy_from_slice(&session_key_vec);
+
+    Ok((session_key, client_uuid))
+}
+
+
+
+pub async fn _code_v1_parse_pre(code: &str) -> Result<(), String> {
+    let _ = code::V1::parse_pre(&code).ok_or(format!("Failed to parse code: {}", code))?;
+    Ok(())
+}
+pub async fn _code_v1_auth(
+    code: &str,
+    product_id: u32,
+    binding: &str,
+    parse_pre: bool,
+    api_base_url: &str,
+    client_uuid: &str,
+    session_key: &[u8],
+) -> Result<String, String> {
+    if parse_pre {
+        _code_v1_parse_pre(code).await?;
+    }
+    if session_key.len() != 32 {
+        return Err(format!(
+            "Invalid session key length: expected 32, got {}",
+            session_key.len()
+        ));
+    }
+
+    let encrypt = |plaintext: &str| -> Result<String, String> {
+        let encrypted = Aes256Gcm::encrypt(session_key, plaintext.as_bytes())
+            .ok_or_else(|| format!("AES encrypt failed for: {}", plaintext))?;
+        Ok(Base91::encode(&encrypted))
+    };
+
+    let now_sec = js_sys::Date::now() / 1000.0;
+    let now_sec_str = (now_sec as u64).to_string();
+
+    let data_1 = encrypt(&now_sec_str)?;
+    let data_2 = encrypt(code)?;
+    let data_3 = encrypt(&product_id.to_string())?;
+    let data_4 = encrypt(binding)?;
+
+    let body = serde_json::json!({
+        "client_uuid": client_uuid,
+        "data_1": data_1,
+        "data_2": data_2,
+        "data_3": data_3,
+        "data_4": data_4,
+    });
+
+    let resp = post_json(
+        &format!("{}/auth/reg/code/v1", api_base_url),
+        &body,
+        None,
+    )
+        .await?;
+
+    let data = extract_data(&resp)?;
+
+    // data 是 base91 编码的 aes256gcm 加密 json 字符串
+    let data_str = data
+        .as_str()
+        .ok_or("Response data is not a string")?;
+
+    let encrypted_bytes = Base91::decode(data_str)
+        .ok_or("Failed to base91 decode response data")?;
+
+    let decrypted = Aes256Gcm::decrypt(session_key, &encrypted_bytes)
+        .ok_or("Failed to decrypt response data")?;
+
+    let json_str = String::from_utf8(decrypted)
+        .map_err(|e| format!("Invalid UTF-8 in response: {}", e))?;
+
+    let key = kdf::Pbkdf2HmacSha256::derive(binding,api_base_url,32)
+        .ok_or("Failed to derive key".to_string())?;
+    let license = Aes256GcmSiv::encrypt(key.as_slice(), &json_str)
+        .ok_or("Failed to encrypt".to_string())?;
+
+    Ok(Base85::encode(license))
+}
+
+pub async fn _code_v1_auth_again(
+    license_b85: &str,
+    binding: &str,
+    api_base_url: &str,
+    client_uuid: &str,
+    session_key: &[u8],
+) -> Result<String, String> {
+    if session_key.len() != 32 {
+        return Err(format!(
+            "Invalid session key length: expected 32, got {}",
+            session_key.len()
+        ));
+    }
+
+    let key = kdf::Pbkdf2HmacSha256::derive(binding,api_base_url,32)
+        .ok_or("Failed to derive key".to_string())?;
+    let license_saved = Base85::decode(license_b85)
+        .ok_or("license无效 ".to_string())?;
+    let json_str = String::from_utf8(Aes256GcmSiv::decrypt(&key, license_saved)
+        .ok_or("Failed to decrypt data")?)
+        .map_err(|_| "Failed to decrypt data".to_string())?;
+
+
+    let prev: Value = serde_json::from_str(&json_str)
+        .map_err(|e| format!("Failed to parse json_str: {}", e))?;
+
+    let tag_sig = prev
+        .get("tag_sig")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing 'tag_sig' in json_str")?;
+
+    let product_id = prev
+        .get("product_id")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing 'product_id' in json_str")?;
+
+    let encrypt = |plaintext: &str| -> Result<String, String> {
+        let encrypted = Aes256Gcm::encrypt(session_key, plaintext.as_bytes())
+            .ok_or_else(|| format!("AES encrypt failed for: {}", plaintext))?;
+        Ok(Base91::encode(&encrypted))
+    };
+
+    let now_sec = (js_sys::Date::now() / 1000.0) as u64;
+
+    let data_1 = encrypt(&now_sec.to_string())?;   // 时间戳
+    let data_2 = encrypt(tag_sig)?;                  // tag_sig (base85 编码字符串，原样加密)
+    let data_3 = encrypt(binding)?;                  // binding
+    let data_4 = encrypt(&product_id.to_string())?; // product_id
+
+    let body = serde_json::json!({
+        "client_uuid": client_uuid,
+        "data_1": data_1,
+        "data_2": data_2,
+        "data_3": data_3,
+        "data_4": data_4,
+    });
+
+    let resp = post_json(
+        &format!("{}/auth/again/reg/code", api_base_url),
+        &body,
+        None,
+    )
+        .await?;
+
+    let data = extract_data(&resp)?;
+
+    let data_str = data
+        .as_str()
+        .ok_or("Response data is not a string")?;
+
+    let encrypted_bytes = Base91::decode(data_str)
+        .ok_or("Failed to base91 decode response data")?;
+
+    let decrypted = Aes256Gcm::decrypt(session_key, &encrypted_bytes)
+        .ok_or("Failed to decrypt response data")?;
+
+    let json_str = String::from_utf8(decrypted)
+        .map_err(|e| format!("Invalid UTF-8 in response: {}", e))?;
+
+    let license = Aes256GcmSiv::encrypt(key.as_slice(), &json_str)
+        .ok_or("Failed to encrypt".to_string())?;
+
+    Ok(Base85::encode(license))
+}
+
+/// License 本地预检（不联网，仅返回是否有效）
+///
+/// 校验内容：
+/// - 解密是否成功（binding 是否正确）
+/// - product_id 是否匹配
+/// - 是否过期（activation_time_point_sec + use_max_duration）
+///
+/// 不校验 tag_sig（因为没有 productKey）
+///
+/// 返回: true = 有效, false = 无效
+pub async fn _license_precheck(
+    license_b85: &str,
+    binding: &str,
+    api_base_url: &str,
+    expected_product_id: u32,
+) -> bool {
+    let key = match kdf::Pbkdf2HmacSha256::derive(binding, api_base_url, 32) {
+        Some(k) => k,
+        None => return false,
+    };
+    let encrypted = match Base85::decode(license_b85) {
+        Some(v) => v,
+        None => return false,
+    };
+    let decrypted = match Aes256GcmSiv::decrypt(&key, encrypted) {
+        Some(v) => v,
+        None => return false,
+    };
+    let json_str = match String::from_utf8(decrypted) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let v: Value = match serde_json::from_str(&json_str) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let product_id = match v.get("product_id").and_then(|x| x.as_u64()) {
+        Some(id) => id as u32,
+        None => return false,
+    };
+    if product_id != expected_product_id {
+        return false;
+    }
+    let activation_time = match v.get("activation_time_point_sec").and_then(|x| x.as_u64()) {
+        Some(t) => t,
+        None => return false,
+    };
+    let duration = match v.get("use_max_duration").and_then(|x| x.as_u64()) {
+        Some(d) => d,
+        None => return false,
+    };
+    let now = (js_sys::Date::now() / 1000.0) as u64;
+    let expire_time = activation_time.saturating_add(duration);
+    if now > expire_time {
+        return false;
+    }
+    true
+}
+
+pub async fn _health_check(api_base_url: &str) -> Result<(), String> {
+    let url = format!("{}/health", api_base_url);
+    let opts = RequestInit::new();
+    opts.set_method("GET");
+
+    let headers = Headers::new()
+        .map_err(|_| "Failed to create headers".to_string())?;
+    headers.set("Content-Type", "application/json")
+        .map_err(|_| "Failed to set Content-Type".to_string())?;
+    headers.set("Service", SERVICE)
+        .map_err(|_| format!("Failed to set header: {}", "Service"))?;
+    opts.set_headers(&headers);
+
+
+    let request = Request::new_with_str_and_init(&url, &opts)
+        .map_err(|_| "Failed to create request".to_string())?;
+
+    let window = web_sys::window()
+        .ok_or_else(|| "No window object".to_string())?;
+
+    let resp_value = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|_| "Fetch failed".to_string())?;
+
+    let resp: Response = resp_value
+        .dyn_into()
+        .map_err(|_| "Invalid response object".to_string())?;
+
+    let json_promise = resp.json()
+        .map_err(|_| "Failed to get json promise".to_string())?;
+
+    let json = JsFuture::from(json_promise)
+        .await
+        .map_err(|_| "Failed to parse JSON".to_string())?;
+
+    let result: Value = serde_wasm_bindgen::from_value(json)
+        .map_err(|e| format!("Failed to convert value: {}", e))?;
+
+    let _data = extract_data(&result)?;
+
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct InitResult {
+    ok: bool,
+    err: String,
+}
+
+#[derive(Serialize)]
+struct AuthOpResult {
+    ok: bool,
+    license: String,
+    err: String,
+}
+
+#[wasm_bindgen]
+pub struct AuthClient {
+    api_base_url: &'static str,
+    client_uuid: Option<String>,
+    session_key: Option<[u8; 32]>,
+    product_id: u32,
+    binding: String,
+    license: Option<String>,
+}
+
+const API_BASE_URL: &str = "https://auth.808050.xyz/api";
+
+#[wasm_bindgen]
+impl AuthClient {
+    /// 创建实例
+    #[wasm_bindgen(constructor)]
+    pub fn new(product_id: u32, binding: String, license: Option<String>) -> Result<AuthClient, JsValue> {
+        Ok(AuthClient {
+            api_base_url: API_BASE_URL,
+            client_uuid: None,
+            session_key: None,
+            product_id,
+            binding,
+            license,
+        })
+    }
+
+    /// 进行密钥交换。返回 { ok: bool, err: string }
+    #[wasm_bindgen]
+    pub async fn init(&mut self) -> JsValue {
+        let result = match _key_exc(self.api_base_url).await {
+            Ok((key, uuid)) => {
+                self.session_key = Some(key);
+                self.client_uuid = Some(uuid);
+                InitResult {
+                    ok: true,
+                    err: "".to_string(),
+                }
+            }
+            Err(e) => InitResult {
+                ok: false,
+                err: e,
+            },
+        };
+        serde_wasm_bindgen::to_value(&result).unwrap()
+    }
+
+    /// 检查 license 是否有效，需要init初始化。返回 { ok: bool, license: string, err: string }
+    #[wasm_bindgen]
+    pub async fn check(&mut self) -> JsValue {
+        let op_result: Result<String, String> = async {
+            let license_saved = self.license
+                .as_ref()
+                .ok_or_else(|| "Missing license".to_string())?;
+
+            let client_uuid = self.client_uuid
+                .as_ref()
+                .ok_or_else(|| "Client not initialized".to_string())?;
+
+            let session_key = self.session_key
+                .as_ref()
+                .ok_or_else(|| "Session key not initialized".to_string())?;
+
+            _code_v1_auth_again(
+                license_saved,
+                &self.binding,
+                self.api_base_url,
+                client_uuid,
+                session_key,
+            ).await
+        }.await;
+
+        let result = match op_result {
+            Ok(new_license) => {
+                self.license = Some(new_license.clone());
+                AuthOpResult {
+                    ok: true,
+                    license: new_license,
+                    err: "".to_string(),
+                }
+            }
+            Err(e) => AuthOpResult {
+                ok: false,
+                license: "".to_string(),
+                err: e,
+            },
+        };
+
+        serde_wasm_bindgen::to_value(&result).unwrap()
+    }
+
+    /// 认证激活码。使用前需要init进行密钥交换。返回 { ok: bool, license: string, err: string }
+    #[wasm_bindgen]
+    pub async fn auth(
+        &mut self,
+        code: String,
+    ) -> JsValue {
+        let op_result: Result<String, String> = async {
+            let client_uuid = self.client_uuid
+                .as_ref()
+                .ok_or_else(|| "Client not initialized".to_string())?;
+
+            let session_key = self.session_key
+                .as_ref()
+                .ok_or_else(|| "Session key not initialized".to_string())?;
+
+            _code_v1_auth(
+                &code,
+                self.product_id,
+                &self.binding,
+                true,
+                self.api_base_url,
+                client_uuid,
+                session_key,
+            ).await
+        }.await;
+
+        let result = match op_result {
+            Ok(new_license) => {
+                self.license = Some(new_license.clone());
+                AuthOpResult {
+                    ok: true,
+                    license: new_license,
+                    err: "".to_string(),
+                }
+            }
+            Err(e) => AuthOpResult {
+                ok: false,
+                license: "".to_string(),
+                err: e,
+            },
+        };
+        serde_wasm_bindgen::to_value(&result).unwrap()
+    }
+
+    /// 本地预检 License（不联网），无需init进行密钥交换
+    #[wasm_bindgen]
+    pub async fn precheck_license(&self) -> bool {
+        let license = match self.license.as_ref() {
+            Some(l) => l,
+            None => return false,
+        };
+
+        _license_precheck(
+            license,
+            &self.binding,
+            self.api_base_url,
+            self.product_id,
+        )
+            .await
+    }
+
+    /// 检查服务器健康状态，无需init进行密钥交换
+    /// 返回： { ok: bool, err: "" }
+    #[wasm_bindgen]
+    pub async fn health(&self) -> JsValue {
+        #[derive(Serialize)]
+        struct HealthResult {
+            ok: bool,
+            err: String,
+        }
+        let result = match _health_check(self.api_base_url).await {
+            Ok(_) => HealthResult {
+                ok: true,
+                err: "".to_string(),
+            },
+            Err(e) => HealthResult {
+                ok: false,
+                err: e,
+            },
+        };
+        serde_wasm_bindgen::to_value(&result).unwrap()
+    }
+}

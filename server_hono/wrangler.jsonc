@@ -20,11 +20,6 @@
 			"id": "5a8295dd41f44e6d982dd1240b7c4e97"
 		}
 	],
-	//	"vars": {
-	//		"SERVER_KEY": "",
-	//		"SUPER_ADMIN_IP": "",
-	//		"SUPER_ADMIN_KEY": ""
-	//	},
 	"rules": [
 		{
 			"type": "Text",
@@ -47,7 +42,22 @@
 			"database_name": "auth-db",
 			"database_id": "b8d4f97c-1e82-4ac6-aeca-cbc2dcaaf6d7"
 		}
-	]
+	],
+	"queues": {
+		"producers": [
+			{
+				"queue": "auth-log-queue",
+				"binding": "LOG_QUEUE"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "auth-log-queue",
+				"max_batch_size": 100,
+				"max_batch_timeout": 5
+			}
+		]
+	}
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

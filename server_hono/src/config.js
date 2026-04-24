@@ -1,0 +1,12 @@
+// 配置常量
+export const CONFIG = {
+    RSA_KEY_UPDATE_TIME: 60 * 60 * 24, // 24小时
+    CLIENT_KEY_TTL: 300, // 客户端Key存活时间
+    TIMESTAMP_TOLERANCE_MS: 60 * 1000, // 时间戳容差
+    MAX_QUANTITY: 100, // 单次最大生成数量
+    MAX_CODE_VALIDITY_SECONDS: 365 * 24 * 60 * 60,
+    MAX_USE_VALIDITY_SECONDS: 10 * 365 * 24 * 60 * 60,
+    SERVICE_HEADER_NAME: "Service",
+    SERVICE_HEADER_VALUE: "auth-1.0.1",
+    ServerBaseTimestamp: 1768276281
+};

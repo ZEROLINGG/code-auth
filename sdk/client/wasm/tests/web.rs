@@ -3,13 +3,14 @@
 #![cfg(target_arch = "wasm32")]
 
 extern crate wasm_bindgen_test;
+
+use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;
-use auth::greet;
+use wasm::*;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
 #[wasm_bindgen_test]
-fn pass() {
-    greet();
-    assert_eq!(1 + 1, 2);
+async fn abc() {
+
 }

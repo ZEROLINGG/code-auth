@@ -1,9 +1,40 @@
 ﻿// routes/superAdmin.ts
 import {Context, Hono} from "hono";
-import { Code } from "../tool/code";
+// import { Code } from "../tool/code";
+import {base64_encode_from_str, code_v1_generate} from "../tool/pkg";
 import {getClientIP} from "../tool/tool";
 import suHtml from '../html/superAdminPage.html';
 import {Product} from "../tool/product";
+
+import {log} from "../tool/log";
+
+const TAG = "ADMIN_API";
+//
+// const Logd = (c: Context, msg: string) => {
+//     const ip = getClientIP(c);
+//     const path = c.req.path;
+//     const method = c.req.method;
+//     log.d(TAG, `[${method} ${path}][${ip}] ${msg}`);
+// };
+//
+// const Logi = (c: Context, msg: string) => {
+//     const ip = getClientIP(c);
+//     const path = c.req.path;
+//     const method = c.req.method;
+//     log.i(TAG, `[${method} ${path}][${ip}] ${msg}`);
+// };
+// const Logw = (c: Context, msg: string) => {
+//     const ip = getClientIP(c);
+//     const path = c.req.path;
+//     const method = c.req.method;
+//     log.w(TAG, `[${method} ${path}][${ip}] ${msg}`);
+// };
+// const Loge = (c: Context, msg: string) => {
+//     const ip = getClientIP(c);
+//     const path = c.req.path;
+//     const method = c.req.method;
+//     log.e(TAG, `[${method} ${path}][${ip}] ${msg}`);
+// };
 
 const superAdmin = new Hono<{ Bindings: CloudflareBindings }>();
 
@@ -27,7 +58,7 @@ export async function authSuperAdmin(
     }
 
     // 2. IP 白名单校验（支持 , 和 ;）
-    const clientIp = getClientIP(c.req.raw);
+    const clientIp = getClientIP(c);
 
     const allowedIPs = SUPER_ADMIN_IP
         .split(/[;,]/)          // 同时支持 , ;
@@ -156,7 +187,7 @@ superAdmin.delete("/product/:id", async (c) => {
         }
 
         // 调用 Product 类的 delete 方法
-        const success = await Product.delete(c.env.AUTH_KV, id);
+        const success = await Product.delete(c.env.AUTH_KV, Number(id));
 
         if (!success) {
             // 如果删除失败，很可能是因为该 ID 不存在
@@ -178,85 +209,14 @@ superAdmin.delete("/product/:id", async (c) => {
 });
 
 /**
- * 根据产品名生成激活码
- * POST /code/generate
- * Body: {
- *   "productName": "产品名称",
- *   "expirationPeriod": 2592000,    // 激活码有效期（秒），如 30天
- *   "activationDuration": 31536000, // 激活后的使用时长（秒），如 1年
- *   "amount": 1                     // 可使用次数
- * }
- */
-superAdmin.post("/code/generate", async (c) => {
-    try {
-        // 超级管理员认证
-        const isAuthed = await authSuperAdmin(c);
-
-        if (!isAuthed) {
-            return c.text("Not Found", 404);
-        }
-
-        const body = await c.req.json();
-        const { productName, expirationPeriod, activationDuration, amount } = body;
-
-        // 参数验证
-        if (!productName || typeof productName !== "string") {
-            return c.json({ success: false, message: "Invalid productName" }, 400);
-        }
-
-        if (typeof expirationPeriod !== "number" || expirationPeriod <= 0) {
-            return c.json({ success: false, message: "Invalid expirationPeriod" }, 400);
-        }
-
-        if (typeof activationDuration !== "number" || activationDuration <= 0) {
-            return c.json({ success: false, message: "Invalid activationDuration" }, 400);
-        }
-
-        if (typeof amount !== "number" || amount <= 0 || !Number.isInteger(amount)) {
-            return c.json({ success: false, message: "Invalid amount" }, 400);
-        }
-
-        const [success, code] = await Code.gent(
-            c.env.AUTH_KV,
-            c.env.SERVER_KEY,
-            productName,
-            expirationPeriod,
-            activationDuration,
-            amount
-        );
-
-        if (!success) {
-            return c.json({
-                success: false,
-                message: "Product not found or code generation failed"
-            }, 400);
-        }
-
-        return c.json({
-            success: true,
-            message: "Activation code generated successfully",
-            data: {
-                code,
-                productName,
-                expirationPeriod,
-                activationDuration,
-                amount
-            }
-        });
-    } catch (error) {
-        console.error("Generate code error:", error);
-        return c.json({ success: false, message: "Internal server error" }, 500);
-    }
-});
-
-/**
- * 根据产品ID生成激活码
+ * 根据产品ID生成单个激活码
  * POST /code/generate-by-id
  * Body: {
- *   "productId": "产品ID",
- *   "expirationPeriod": 2592000,
- *   "activationDuration": 31536000,
- *   "amount": 1
+ *   "productId": number,
+ *   "codeValidDuration": number,     // 激活码有效期（秒），从生成时刻开始计算
+ *   "useMaxDuration": number,       // 最大使用时长（秒），激活后可用时间
+ *   "maxUses": number,              // 最大使用次数
+ *   "prebind"?: number | null       // 预绑定用户ID（可选）
  * }
  */
 superAdmin.post("/code/generate-by-id", async (c) => {
@@ -269,39 +229,56 @@ superAdmin.post("/code/generate-by-id", async (c) => {
         }
 
         const body = await c.req.json();
-        const { productId, expirationPeriod, activationDuration, amount } = body;
+        const { productId, codeValidDuration, useMaxDuration, maxUses, prebind } = body;
 
-        // 参数验证
-        if (!productId || typeof productId !== "string") {
+        // 1. 参数验证
+        if (!productId || typeof productId !== "number" || !Number.isInteger(productId)) {
             return c.json({ success: false, message: "Invalid productId" }, 400);
         }
 
-        if (typeof expirationPeriod !== "number" || expirationPeriod <= 0) {
-            return c.json({ success: false, message: "Invalid expirationPeriod" }, 400);
+        if (typeof codeValidDuration !== "number" || codeValidDuration <= 0 || !Number.isInteger(codeValidDuration)) {
+            return c.json({ success: false, message: "Invalid codeValidDuration" }, 400);
         }
 
-        if (typeof activationDuration !== "number" || activationDuration <= 0) {
-            return c.json({ success: false, message: "Invalid activationDuration" }, 400);
+        if (typeof useMaxDuration !== "number" || useMaxDuration <= 0 || !Number.isInteger(useMaxDuration)) {
+            return c.json({ success: false, message: "Invalid useMaxDuration" }, 400);
         }
 
-        if (typeof amount !== "number" || amount <= 0 || !Number.isInteger(amount)) {
-            return c.json({ success: false, message: "Invalid amount" }, 400);
+        if (typeof maxUses !== "number" || maxUses <= 0 || !Number.isInteger(maxUses)) {
+            return c.json({ success: false, message: "Invalid maxUses" }, 400);
         }
 
-        const [success, code] = await Code.gentId(
-            c.env.AUTH_KV,
-            c.env.SERVER_KEY,
+        // prebind 可选，但如果有值必须是有效的整数
+        if (prebind !== undefined && prebind !== null) {
+            if (typeof prebind !== "number" || !Number.isInteger(prebind)) {
+                return c.json({ success: false, message: "Invalid prebind" }, 400);
+            }
+        }
+
+        // 2. 检查产品是否存在
+        if (!await Product.existsId(c.env.AUTH_KV, productId)) {
+            return c.json({ success: false, message: "Product not found" }, 404);
+        }
+
+        // 3. 获取产品密钥
+        const [ok, productKey] = await Product.getKey(c.env.AUTH_KV, productId);
+
+        if (!ok || !productKey) {
+            return c.json({ success: false, message: "Failed to get product key" }, 500);
+        }
+
+        // 4. 生成激活码
+        const code = code_v1_generate(
+            productKey,
             productId,
-            expirationPeriod,
-            activationDuration,
-            amount
+            codeValidDuration,
+            useMaxDuration,
+            maxUses,
+            prebind ?? null
         );
 
-        if (!success) {
-            return c.json({
-                success: false,
-                message: "Product not found or code generation failed"
-            }, 400);
+        if (!code) {
+            return c.json({ success: false, message: "Code generation failed" }, 500);
         }
 
         return c.json({
@@ -310,11 +287,13 @@ superAdmin.post("/code/generate-by-id", async (c) => {
             data: {
                 code,
                 productId,
-                expirationPeriod,
-                activationDuration,
-                amount
+                codeValidDuration,
+                useMaxDuration,
+                maxUses,
+                prebind: prebind ?? null
             }
         });
+
     } catch (error) {
         console.error("Generate code by id error:", error);
         return c.json({ success: false, message: "Internal server error" }, 500);
@@ -323,18 +302,18 @@ superAdmin.post("/code/generate-by-id", async (c) => {
 
 /**
  * 批量生成激活码
- * POST /code/batch-generate
+ * POST /code/batch-generate-by-id
  * Body: {
- *   "productName": "产品名称",
- *   "expirationPeriod": 2592000,
- *   "activationDuration": 31536000,
- *   "amount": 1,
- *   "count": 10  // 生成数量
+ *   "productId": number,
+ *   "codeValidDuration": number,
+ *   "useMaxDuration": number,
+ *   "maxUses": number,
+ *   "count": number,             // 生成数量 (1-100)
+ *   "prebind"?: number | null
  * }
  */
-superAdmin.post("/code/batch-generate", async (c) => {
+superAdmin.post("/code/batch-generate-by-id", async (c) => {
     try {
-        // 超级管理员认证
         const isAuthed = await authSuperAdmin(c);
 
         if (!isAuthed) {
@@ -342,48 +321,65 @@ superAdmin.post("/code/batch-generate", async (c) => {
         }
 
         const body = await c.req.json();
-        const { productName, expirationPeriod, activationDuration, amount, count } = body;
+        const { productId, codeValidDuration, useMaxDuration, maxUses, count, prebind } = body;
 
         // 参数验证
-        if (!productName || typeof productName !== "string") {
-            return c.json({ success: false, message: "Invalid productName" }, 400);
+        if (!productId || typeof productId !== "number" || !Number.isInteger(productId)) {
+            return c.json({ success: false, message: "Invalid productId" }, 400);
         }
 
-        if (typeof expirationPeriod !== "number" || expirationPeriod <= 0) {
-            return c.json({ success: false, message: "Invalid expirationPeriod" }, 400);
+        if (typeof codeValidDuration !== "number" || codeValidDuration <= 0 || !Number.isInteger(codeValidDuration)) {
+            return c.json({ success: false, message: "Invalid codeValidDuration" }, 400);
         }
 
-        if (typeof activationDuration !== "number" || activationDuration <= 0) {
-            return c.json({ success: false, message: "Invalid activationDuration" }, 400);
+        if (typeof useMaxDuration !== "number" || useMaxDuration <= 0 || !Number.isInteger(useMaxDuration)) {
+            return c.json({ success: false, message: "Invalid useMaxDuration" }, 400);
         }
 
-        if (typeof amount !== "number" || amount <= 0 || !Number.isInteger(amount)) {
-            return c.json({ success: false, message: "Invalid amount" }, 400);
+        if (typeof maxUses !== "number" || maxUses <= 0 || !Number.isInteger(maxUses)) {
+            return c.json({ success: false, message: "Invalid maxUses" }, 400);
         }
 
-        if (typeof count !== "number" || count <= 0 || count > 100 || !Number.isInteger(count)) {
-            return c.json({
-                success: false,
-                message: "Invalid count (must be 1-100)"
-            }, 400);
+        if (typeof count !== "number" || count < 1 || count > 100 || !Number.isInteger(count)) {
+            return c.json({ success: false, message: "Invalid count (must be 1-100)" }, 400);
+        }
+
+        if (prebind !== undefined && prebind !== null) {
+            if (typeof prebind !== "number" || !Number.isInteger(prebind)) {
+                return c.json({ success: false, message: "Invalid prebind" }, 400);
+            }
+        }
+
+        // 检查产品是否存在
+        if (!await Product.existsId(c.env.AUTH_KV, productId)) {
+            return c.json({ success: false, message: "Product not found" }, 404);
+        }
+
+        // 获取产品密钥
+        const [ok, productKey] = await Product.getKey(c.env.AUTH_KV, productId);
+
+        if (!ok || !productKey) {
+            return c.json({ success: false, message: "Failed to get product key" }, 500);
         }
 
         // 批量生成
         const codes: string[] = [];
+        const prebindValue = prebind ?? null;
+
         for (let i = 0; i < count; i++) {
-            const [success, code] = await Code.gent(
-                c.env.AUTH_KV,
-                c.env.SERVER_KEY,
-                productName,
-                expirationPeriod,
-                activationDuration,
-                amount
+            const code = code_v1_generate(
+                productKey,
+                productId,
+                codeValidDuration,
+                useMaxDuration,
+                maxUses,
+                prebindValue
             );
 
-            if (!success) {
+            if (!code) {
                 return c.json({
                     success: false,
-                    message: `Failed to generate code ${i + 1}`
+                    message: `Code generation failed at index ${i + 1}`
                 }, 500);
             }
 
@@ -395,13 +391,15 @@ superAdmin.post("/code/batch-generate", async (c) => {
             message: `Successfully generated ${count} activation codes`,
             data: {
                 codes,
-                productName,
+                productId,
+                codeValidDuration,
+                useMaxDuration,
+                maxUses,
                 count,
-                expirationPeriod,
-                activationDuration,
-                amount
+                prebind: prebindValue
             }
         });
+
     } catch (error) {
         console.error("Batch generate codes error:", error);
         return c.json({ success: false, message: "Internal server error" }, 500);

@@ -1,1 +1,17 @@
-{	"name": "code-auth",	"type": "module",	"scripts": {		"dev": "wrangler dev",		"deploy": "wrangler deploy --minify",		"cf-typegen": "wrangler types --env-interface CloudflareBindings"	},	"dependencies": {		"hono": "^4.11.3"	},	"devDependencies": {		"wrangler": "^4.58.0"	}}
+{
+  "name": "code-auth",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy --minify",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+  },
+  "dependencies": {
+    "hono": "^4.11.3",
+    "ts-to-zod": "^5.1.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "wrangler": "^4.58.0"
+  }
+}

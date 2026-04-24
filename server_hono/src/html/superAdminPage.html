@@ -565,7 +565,7 @@
                             <input type="number" id="genAmount" value="1" min="1">
                         </div>
                     </div>
-                    <div class="info-text">提示：激活码有效期指激活码可用于激活的时间，激活后使用时长指激活后产品的授权期限</div>
+                    <div class="info-text">提示：必须从下拉列表中选择产品。激活码有效期从生成时刻开始计算，激活后使用时长为授权期限。</div>
                     <div class="form-row mt-10">
                         <button onclick="generateCode()" class="primary">生成激活码</button>
                         <button onclick="copyAllCodes()" id="copyAllBtn" class="hidden">复制全部</button>
@@ -626,10 +626,9 @@
 <script>
     let products = [];
     let generatedCodes = [];
-    // 当前已确认选中的产品
     let selectedProduct = { name: '', id: '' };
 
-    const API_BASE = '/admin/su';
+    const API_BASE = '/admin/su';   // 根据实际路由调整
 
     function $(id) {
         return document.getElementById(id);
@@ -665,7 +664,7 @@
         return s + '秒';
     }
 
-    // 标签页
+    // 标签页切换
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', () => {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -675,20 +674,20 @@
         });
     });
 
-    // ── Combobox ──────────────────────────────────────────────
+    // ==================== Combobox ====================
     function renderDropdownOptions(list) {
         const dropdown = $('productDropdown');
         if (list.length === 0) {
             dropdown.innerHTML = '<div class="combobox-option empty">无匹配产品</div>';
         } else {
             dropdown.innerHTML = list.map(p => `
-<div class="combobox-option"
-  data-name="${p.name}"
-  data-id="${p.id}"
-  onmousedown="selectProduct('${p.name}', '${p.id}')">
-  ${p.name}
-</div>
-`).join('');
+                <div class="combobox-option"
+                     data-name="${p.name}"
+                     data-id="${p.id}"
+                     onmousedown="selectProduct('${p.name}', '${p.id}')">
+                    ${p.name} <span class="text-muted">(ID: ${p.id})</span>
+                </div>
+            `).join('');
         }
     }
 
@@ -699,8 +698,7 @@
             : products;
         renderDropdownOptions(filtered);
         $('productDropdown').classList.add('open');
-// 用户手动输入时清空已选状态
-        selectedProduct = { name: '', id: '' };
+        selectedProduct = { name: '', id: '' };   // 清空已选
     }
 
     function selectProduct(name, id) {
@@ -715,20 +713,18 @@
     }
 
     function closeDropdown() {
-// 延迟，让 mousedown 的 selectProduct 先执行
         setTimeout(() => {
             $('productDropdown').classList.remove('open');
-// 如果用户最终输入的文字与选中产品名不一致，尝试精确匹配一次
-            if (!selectedProduct.name) {
+            if (!selectedProduct.id) {
                 const val = $('genProductInput').value.trim();
                 const match = products.find(p => p.name === val);
                 if (match) selectedProduct = { name: match.name, id: match.id };
             }
-        }, 150);
+        }, 180);
     }
-    // ─────────────────────────────────────────────────────────
+    // =================================================
 
-    // 产品管理
+    // 加载产品列表
     async function loadProducts() {
         try {
             const res = await api('/products');
@@ -736,7 +732,7 @@
                 products = res.data || [];
                 renderDropdownOptions(products);
                 renderProductList();
-                toast('已加载 ' + products.length + ' 个产品', 'success');
+                toast(`已加载 ${products.length} 个产品`, 'success');
             } else {
                 toast(res.message || '加载失败', 'error');
             }
@@ -752,32 +748,30 @@
             return;
         }
         tbody.innerHTML = products.map(p => `
-<tr>
-<td><code>${p.id}</code></td>
-<td>${p.name}</td>
-<td>
-<div class="action-buttons">
-<button class="btn-sm" onclick="quickGenerate('${p.name}', '${p.id}')">生成</button>
-<button class="btn-sm" onclick="deleteProduct('${p.id}', '${p.name}')">删除</button>
-</div>
-</td>
-</tr>
-`).join('');
+            <tr>
+                <td><code>${p.id}</code></td>
+                <td>${p.name}</td>
+                <td>
+                    <button class="btn-sm" onclick="quickGenerate('${p.name}', '${p.id}')">生成</button>
+                    <button class="btn-sm" onclick="deleteProduct('${p.id}', '${p.name}')">删除</button>
+                </td>
+            </tr>
+        `).join('');
     }
 
     async function addProduct() {
         const input = $('newProductName');
         const name = input.value.trim();
         if (!name) { toast('请输入产品名称', 'error'); return; }
+
         try {
             const res = await api('/product', {
                 method: 'POST',
                 body: JSON.stringify({ name })
             });
             if (res.success) {
-                toast('产品创建成功：' + name, 'success');
+                toast('产品创建成功', 'success');
                 input.value = '';
-                $('checkResult').classList.add('hidden');
                 await loadProducts();
             } else {
                 toast(res.message || '创建失败', 'error');
@@ -792,17 +786,17 @@
         try {
             const res = await api(`/product/${id}`, { method: 'DELETE' });
             if (res.success) {
-                toast(`产品 "${name}" 已成功删除`, 'success');
+                toast(`产品 "${name}" 已删除`, 'success');
                 await loadProducts();
             } else {
                 toast(res.message || '删除失败', 'error');
             }
         } catch (e) {
-            toast('删除产品时发生错误', 'error');
+            toast('删除失败', 'error');
         }
     }
 
-    // 预设
+    // 预设按钮
     function setExpiration(seconds) {
         $('genExpiration').value = seconds;
         toast(`激活码有效期已设置为：${formatSeconds(seconds)}`);
@@ -826,88 +820,124 @@
         const duration = parseInt($('genDuration').value);
         const count = parseInt($('genCount').value);
 
-        $('expirationPresets').querySelectorAll('button').forEach(btn => {
+        document.querySelectorAll('#expirationPresets button').forEach(btn => {
             btn.classList.toggle('preset-active', parseInt(btn.dataset.value) === expiration);
         });
-        $('durationPresets').querySelectorAll('button').forEach(btn => {
+        document.querySelectorAll('#durationPresets button').forEach(btn => {
             btn.classList.toggle('preset-active', parseInt(btn.dataset.value) === duration);
         });
-        $('countPresets').querySelectorAll('button').forEach(btn => {
+        document.querySelectorAll('#countPresets button').forEach(btn => {
             btn.classList.toggle('preset-active', parseInt(btn.dataset.value) === count);
         });
     }
 
-    // 生成激活码
+    // ==================== 生成激活码 ====================
+    // 创建单个激活码项
+    function createCodeItem(code, index) {
+        const item = document.createElement('div');
+        item.className = 'code-item';
+
+        // 序号
+        const numSpan = document.createElement('span');
+        numSpan.className = 'text-muted';
+        numSpan.textContent = String(index).padStart(2, '0');
+        item.appendChild(numSpan);
+
+        // 激活码（使用 textContent 安全显示）
+        const codeEl = document.createElement('code');
+        codeEl.textContent = code;                    // 关键：textContent 而非 innerHTML
+        item.appendChild(codeEl);
+
+        // 点击复制（使用 addEventListener，避免内联 onclick 拼接）
+        item.addEventListener('click', () => {
+            copyCode(code);
+        });
+
+        return item;
+    }
     async function generateCode() {
-        const expiration = parseInt($('genExpiration').value);
-        const duration = parseInt($('genDuration').value);
-        const amount = parseInt($('genAmount').value);
+        const codeValidDuration = parseInt($('genExpiration').value);
+        const useMaxDuration = parseInt($('genDuration').value);
+        const maxUses = parseInt($('genAmount').value);
         const count = parseInt($('genCount').value);
 
-        const productName = selectedProduct.name || $('genProductInput').value.trim();
-        const productId = selectedProduct.id;
-
-        if (!productName) { toast('请选择产品', 'error'); return; }
-        if (count < 1 || count > 100) { toast('数量必须在 1-100 之间', 'error'); return; }
-
-        const output = $('genResult');
-        const codeList = $('genCodeList');
-        output.classList.remove('hidden', 'success', 'error');
-
-        if (count > 1) {
-            try {
-                const res = await api('/code/batch-generate', {
-                    method: 'POST',
-                    body: JSON.stringify({ productName, count, expirationPeriod: expiration, activationDuration: duration, amount })
-                });
-                if (res.success) {
-                    generatedCodes = res.data.codes;
-                    output.classList.add('success');
-                    codeList.innerHTML = res.data.codes.map((code, i) => `
-<div class="code-item" onclick="copyCode('${code}')">
-<span class="text-muted">${String(i + 1).padStart(2, '0')}</span>
-<code>${code}</code>
-</div>
-`).join('');
-                    $('copyAllBtn').classList.remove('hidden');
-                    $('downloadBtn').classList.remove('hidden');
-                    toast(`成功生成 ${count} 个激活码`, 'success');
-                } else {
-                    output.classList.add('error');
-                    codeList.innerHTML = `<pre>${res.message || '批量生成失败'}</pre>`;
-                    toast(res.message || '批量生成失败', 'error');
-                }
-            } catch (e) {
-                toast('批量生成失败', 'error');
-            }
+        if (!selectedProduct.id) {
+            toast('请从下拉列表中选择一个产品，或者手动输入名称', 'error');
+            return;
+        }
+        if (!Number.isInteger(count)) {
+            toast('生成数量必须是有效整数', 'error');
+            return;
+        }
+        if (count < 1 || count > 100) {
+            toast('生成数量必须在 1-100 之间', 'error');
             return;
         }
 
-// 单个
+        const output = $('genResult');
+        const codeList = $('genCodeList');
+
+        // 重置输出区域
+        output.classList.remove('hidden', 'success', 'error');
+        codeList.innerHTML = '';                    // 清空旧内容（安全）
+        $('copyAllBtn').classList.add('hidden');
+        $('downloadBtn').classList.add('hidden');
+
+        const payload = {
+            productId: parseInt(selectedProduct.id),
+            codeValidDuration: codeValidDuration,
+            useMaxDuration: useMaxDuration,
+            maxUses: maxUses,
+            count: count
+        };
+
         try {
-            const res = await api('/code/generate', {
+            const endpoint = count > 1 ? '/code/batch-generate-by-id' : '/code/generate-by-id';
+
+            const res = await api(endpoint, {
                 method: 'POST',
-                body: JSON.stringify({ productName, expirationPeriod: expiration, activationDuration: duration, amount })
+                body: JSON.stringify(payload)
             });
+
             if (res.success) {
-                generatedCodes = [res.data.code];
                 output.classList.add('success');
-                codeList.innerHTML = `
-<div class="code-item" onclick="copyCode('${res.data.code}')">
-<code>${res.data.code}</code>
-</div>`;
-                $('copyAllBtn').classList.add('hidden');
-                $('downloadBtn').classList.add('hidden');
-                toast('激活码生成成功', 'success');
+                generatedCodes = [];
+
+                if (count > 1 && res.data.codes && Array.isArray(res.data.codes)) {
+                    generatedCodes = res.data.codes;
+
+                    // 使用 createElement 安全渲染每个激活码
+                    res.data.codes.forEach((code, i) => {
+                        const item = createCodeItem(code, i + 1);
+                        codeList.appendChild(item);
+                    });
+
+                    $('copyAllBtn').classList.remove('hidden');
+                    $('downloadBtn').classList.remove('hidden');
+                }
+                else if (res.data.code) {
+                    generatedCodes = [res.data.code];
+                    const item = createCodeItem(res.data.code, 1);
+                    codeList.appendChild(item);
+                }
+
+                toast(`成功生成 ${count} 个激活码`, 'success');
             } else {
                 output.classList.add('error');
-                codeList.innerHTML = `<pre>${res.message || '生成失败'}</pre>`;
+                const errorMsg = document.createElement('pre');
+                errorMsg.textContent = res.message || '生成失败';
+                codeList.appendChild(errorMsg);
                 toast(res.message || '生成失败', 'error');
             }
         } catch (e) {
-            toast('生成激活码失败', 'error');
+            output.classList.add('error');
+            const errorMsg = document.createElement('pre');
+            errorMsg.textContent = '请求失败，请检查网络';
+            codeList.appendChild(errorMsg);
+            toast('请求失败，请检查网络', 'error');
         }
     }
+    // ========================================================
 
     function quickGenerate(productName, productId) {
         selectedProduct = { name: productName, id: productId };
@@ -922,17 +952,18 @@
     }
 
     function copyAllCodes() {
+        if (generatedCodes.length === 0) return;
         navigator.clipboard.writeText(generatedCodes.join('\n'))
             .then(() => toast('所有激活码已复制', 'success'))
             .catch(() => toast('复制失败', 'error'));
     }
 
     function downloadCodes() {
-        const productName = selectedProduct.name || $('genProductInput').value || 'codes';
-        let csvContent = '序号,激活码,产品名\n';
+        if (generatedCodes.length === 0) return;
+        const productName = selectedProduct.name || 'activation_codes';
+        let csvContent = '序号,激活码,产品名称\n';
         generatedCodes.forEach((code, index) => {
-            const escaped = productName.replace(/"/g, '""');
-            csvContent += `${index + 1},"${code}","${escaped}"\n`;
+            csvContent += `${index + 1},"${code}","${productName}"\n`;
         });
         const BOM = '\uFEFF';
         const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8' });
@@ -942,16 +973,18 @@
         a.download = `${productName}_${new Date().toISOString().slice(0,10)}.csv`;
         a.click();
         URL.revokeObjectURL(url);
-        toast('CSV文件下载成功', 'success');
+        toast('CSV 文件下载成功', 'success');
     }
 
     // 初始化
     window.addEventListener('DOMContentLoaded', () => {
         loadProducts();
         $('statusDot').classList.add('online');
+
         $('genExpiration').addEventListener('input', updatePresetHighlight);
         $('genDuration').addEventListener('input', updatePresetHighlight);
         $('genCount').addEventListener('input', updatePresetHighlight);
+
         updatePresetHighlight();
     });
 </script>

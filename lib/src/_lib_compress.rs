@@ -1,4 +1,4 @@
-
+//lib/src/_lib_compress.rs
 const MAX_COMPRESSION_RATIO: u64 = 1024;
 const MAX_DECOMPRESSED_SIZE: u64 = 256 * 1024 * 1024; // 256 MiB
 

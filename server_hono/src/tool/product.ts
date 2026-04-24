@@ -1,8 +1,12 @@
-﻿import {randomString, kvLock} from "./tool";
+﻿//server_hono/src/tool/product.ts
+
+import {kvLock} from "./tool";
+import {random_u32} from "./tool";
+import {random_bytes} from "./tool";
 
 interface IProduct {
     name: string;
-    id: string;
+    id: number; // u32
 }
 
 const UNSAFE_CHAR_REGEX = /[^\u4e00-\u9fa5a-zA-Z0-9._=\[\]()*#@!+$\-]/g;
@@ -16,82 +20,197 @@ function normalizeString(raw: string): string {
     return name;
 }
 
+/** u32 number -> 8位十六进制字符串，用于 KV key */
+function u32ToHex(id: number): string {
+    return (id >>> 0).toString(16).padStart(8, "0");
+}
+
+/** 8位十六进制字符串 -> u32 number */
+function hexToU32(hex: string): number | null {
+    if (!/^[0-9a-f]{8}$/i.test(hex)) return null;
+    const n = parseInt(hex, 16);
+    return isNaN(n) ? null : n >>> 0;
+}
+
+/** Uint8Array -> base64 string */
+function bytesToBase64(bytes: Uint8Array): string {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+/** base64 string -> Uint8Array */
+function base64ToBytes(base64: string): Uint8Array | null {
+    try {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+    } catch {
+        return null;
+    }
+}
+
 export class Product {
-    // KV 键前缀
-    private static readonly PREFIX_NAME = "P:N:";   // P:N:<name> -> id
-    private static readonly PREFIX_ID = "P:I:";     // P:I:<id>   -> name
-    private static readonly ALL_NAMES_KEY = "P:A";  // P:A        -> [name1, name2, ...]
-    private static readonly PRODUCT_ID_LENGTH = 7;
+    private static readonly PREFIX_NAME = "P:N:";       // P:N:<name>      -> hex(id)
+    private static readonly PREFIX_ID   = "P:I:";       // P:I:<hex_id>    -> name
+    private static readonly PREFIX_KEY  = "P:K:";       // P:K:<hex_id>    -> base64(key)
+    private static readonly ALL_NAMES_KEY = "P:A";      // P:A             -> Set<string>
+    private static readonly KEY_LENGTH = 32;            // 产品密钥长度 32 字节
 
     /**
-     * 添加产品
-     * 写入 3 个 key：名称索引、ID索引、名称列表
+     * 将 Set<string> 序列化为 JSON 字符串
+     * Set 自动去重，保证数据一致性
      */
-    static async set(kv: KVNamespace, name: string): Promise<[boolean, string]> {
-        name = normalizeString(name);
-        if (!name) return [false, ""];
+    private static serializeSet(set: Set<string>): string {
+        return JSON.stringify([...set]);
+    }
 
-        const nameKey = `${this.PREFIX_NAME}${name}`;
-
-        await kvLock.waitAndAcquire(kv, nameKey);
+    /**
+     * 将 JSON 字符串反序列化为 Set<string>
+     */
+    private static deserializeSet(json: string | null): Set<string> {
+        if (!json) return new Set<string>();
         try {
-            // O(1) 检查名称是否已存在
-            const existingId = await kv.get(nameKey);
-            if (existingId) {
-                return [false, ""];
-            }
+            const arr = JSON.parse(json);
+            if (!Array.isArray(arr)) return new Set<string>();
+            return new Set<string>(arr.filter((v) => typeof v === "string"));
+        } catch {
+            return new Set<string>();
+        }
+    }
 
-            const id = randomString(this.PRODUCT_ID_LENGTH);
-            const allNames = await this.getNames(kv);
-            allNames.push(name);
-
-            // 并行写入三个 key
-            await Promise.all([
-                kv.put(nameKey, id),
-                kv.put(`${this.PREFIX_ID}${id}`, name),
-                kv.put(this.ALL_NAMES_KEY, JSON.stringify(allNames))
-            ]);
-
-            return [true, id];
-        } finally {
-            await kvLock.release(kv, nameKey);
+    /** 生成唯一 u32 id，避免碰撞 */
+    private static async generateUniqueId(kv: KVNamespace): Promise<number> {
+        while (true) {
+            const id = random_u32();
+            const exists = await kv.get(`${this.PREFIX_ID}${u32ToHex(id)}`);
+            if (!exists) return id;
         }
     }
 
     /**
-     * 通过名称获取产品 ID
+     * 生成产品密钥 [u8, 32]
      */
-    static async getId(kv: KVNamespace, name: string): Promise<[boolean, string]> {
-        name = normalizeString(name);
-        if (!name) return [false, ""];
-
-        const id = await kv.get(`${this.PREFIX_NAME}${name}`);
-        return id ? [true, id] : [false, ""];
+    private static generateKey(): Uint8Array | null {
+        return random_bytes(this.KEY_LENGTH);
     }
 
     /**
-     * 通过 ID 获取产品名称
+     * 添加产品
+     * 锁定顺序：ALL_NAMES_LOCK -> nameKey
+     * 返回 [成功, product_id(u32)]，失败时 id 为 0
      */
-    static async getName(kv: KVNamespace, id: string): Promise<[boolean, string]> {
-        id = id.trim();
-        if (!id) return [false, ""];
+    static async set(kv: KVNamespace, name: string): Promise<[boolean, number]> {
+        name = normalizeString(name);
+        if (!name) return [false, 0];
 
-        const name = await kv.get(`${this.PREFIX_ID}${id}`);
+        const nameKey = `${this.PREFIX_NAME}${name}`;
+
+        // 先锁定 ALL_NAMES
+        await kvLock.waitAndAcquire(kv, this.ALL_NAMES_KEY);
+        try {
+            // 再锁定具体的 nameKey
+            await kvLock.waitAndAcquire(kv, nameKey);
+            try {
+                // O(1) 检查名称是否已存在
+                const existingId = await kv.get(nameKey);
+                if (existingId) {
+                    return [false, 0];
+                }
+
+                const id = await this.generateUniqueId(kv);
+                const idHex = u32ToHex(id);
+
+                // 生成产品密钥
+                const keyBytes = this.generateKey();
+                if (!keyBytes) {
+                    return [false, 0];
+                }
+                const keyBase64 = bytesToBase64(keyBytes);
+
+                // 使用 Set 添加名称
+                const allNamesSet = await this.getNamesSet(kv);
+                allNamesSet.add(name);
+
+                await Promise.all([
+                    kv.put(nameKey, idHex),
+                    kv.put(`${this.PREFIX_ID}${idHex}`, name),
+                    kv.put(`${this.PREFIX_KEY}${idHex}`, keyBase64),
+                    kv.put(this.ALL_NAMES_KEY, this.serializeSet(allNamesSet))
+                ]);
+
+                return [true, id];
+            } finally {
+                await kvLock.release(kv, nameKey);
+            }
+        } finally {
+            await kvLock.release(kv, this.ALL_NAMES_KEY);
+        }
+    }
+
+    /**
+     * 通过名称获取产品 ID (u32)
+     */
+    static async getId(kv: KVNamespace, name: string): Promise<[boolean, number]> {
+        name = normalizeString(name);
+        if (!name) return [false, 0];
+
+        const idHex = await kv.get(`${this.PREFIX_NAME}${name}`);
+        if (!idHex) return [false, 0];
+
+        const id = hexToU32(idHex);
+        return id !== null ? [true, id] : [false, 0];
+    }
+
+    /**
+     * 通过 ID (u32) 获取产品名称
+     */
+    static async getName(kv: KVNamespace, id: number): Promise<[boolean, string]> {
+        const idHex = u32ToHex(id);
+        const name = await kv.get(`${this.PREFIX_ID}${idHex}`);
         return name ? [true, name] : [false, ""];
     }
 
     /**
-     * 获取所有产品名称
+     * 通过 ID (u32) 获取产品密钥 [u8, 32]
+     * 返回 [成功, Uint8Array | null]，失败时返回 null
+     */
+    static async getKey(kv: KVNamespace, id: number): Promise<[boolean, Uint8Array | null]> {
+        const idHex = u32ToHex(id);
+        const keyBase64 = await kv.get(`${this.PREFIX_KEY}${idHex}`);
+        if (!keyBase64) {
+            return [false, null];
+        }
+
+        const keyBytes = base64ToBytes(keyBase64);
+        if (!keyBytes || keyBytes.length !== this.KEY_LENGTH) {
+            return [false, null];
+        }
+
+        return [true, keyBytes];
+    }
+
+    /**
+     * 获取所有产品名称 Set
+     * 内部方法，用于高效操作
+     */
+    private static async getNamesSet(kv: KVNamespace): Promise<Set<string>> {
+        const namesJson = await kv.get(this.ALL_NAMES_KEY);
+        return this.deserializeSet(namesJson);
+    }
+
+    /**
+     * 获取所有产品名称（读操作，无锁）
+     * 返回数组，保持原有接口不变
      */
     static async getNames(kv: KVNamespace): Promise<string[]> {
-        const namesJson = await kv.get(this.ALL_NAMES_KEY);
-        if (!namesJson) return [];
-
-        try {
-            return JSON.parse(namesJson) as string[];
-        } catch {
-            return [];
-        }
+        const set = await this.getNamesSet(kv);
+        return [...set];
     }
 
     /**
@@ -101,14 +220,19 @@ export class Product {
         const names = await this.getNames(kv);
         if (names.length === 0) return [];
 
-        // 并行批量获取所有 ID
-        const ids = await Promise.all(
+        const idHexList = await Promise.all(
             names.map(name => kv.get(`${this.PREFIX_NAME}${name}`))
         );
 
         return names
-            .map((name, i) => ({ name, id: ids[i] ?? "" }))
-            .filter(p => p.id !== "");
+            .map((name, i) => {
+                const hex = idHexList[i];
+                if (!hex) return null;
+                const id = hexToU32(hex);
+                if (id === null) return null;
+                return { name, id } satisfies IProduct;
+            })
+            .filter((p): p is IProduct => p !== null);
     }
 
     /**
@@ -117,46 +241,50 @@ export class Product {
     static async existsName(kv: KVNamespace, name: string): Promise<boolean> {
         name = normalizeString(name);
         if (!name) return false;
-
         return (await kv.get(`${this.PREFIX_NAME}${name}`)) !== null;
     }
 
     /**
-     * 判断产品 ID 是否存在
+     * 判断产品 ID (u32) 是否存在
      */
-    static async existsId(kv: KVNamespace, id: string): Promise<boolean> {
-        id = id.trim();
-        if (!id) return false;
-
-        return (await kv.get(`${this.PREFIX_ID}${id}`)) !== null;
+    static async existsId(kv: KVNamespace, id: number): Promise<boolean> {
+        return (await kv.get(`${this.PREFIX_ID}${u32ToHex(id)}`)) !== null;
     }
 
     /**
-     * 删除产品
+     * 删除产品（通过 u32 id）
+     * 锁定顺序：ALL_NAMES_LOCK -> idKey
      */
-    static async delete(kv: KVNamespace, id: string): Promise<boolean> {
-        id = id.trim();
-        if (!id) return false;
+    static async delete(kv: KVNamespace, id: number): Promise<boolean> {
+        const idHex = u32ToHex(id);
+        const idKey = `${this.PREFIX_ID}${idHex}`;
 
-        const idKey = `${this.PREFIX_ID}${id}`;
-
-        await kvLock.waitAndAcquire(kv, idKey);
+        // 先锁定 ALL_NAMES
+        await kvLock.waitAndAcquire(kv, this.ALL_NAMES_KEY);
         try {
-            const name = await kv.get(idKey);
-            if (!name) return false;
+            // 再锁定具体的 idKey
+            await kvLock.waitAndAcquire(kv, idKey);
+            try {
+                const name = await kv.get(idKey);
+                if (!name) return false;
 
-            const allNames = await this.getNames(kv);
-            const newNames = allNames.filter(n => n !== name);
+                // 使用 Set 删除名称
+                const allNamesSet = await this.getNamesSet(kv);
+                allNamesSet.delete(name);
 
-            await Promise.all([
-                kv.delete(`${this.PREFIX_NAME}${name}`),
-                kv.delete(idKey),
-                kv.put(this.ALL_NAMES_KEY, JSON.stringify(newNames))
-            ]);
+                await Promise.all([
+                    kv.delete(`${this.PREFIX_NAME}${name}`),
+                    kv.delete(idKey),
+                    kv.delete(`${this.PREFIX_KEY}${idHex}`),
+                    kv.put(this.ALL_NAMES_KEY, this.serializeSet(allNamesSet))
+                ]);
 
-            return true;
+                return true;
+            } finally {
+                await kvLock.release(kv, idKey);
+            }
         } finally {
-            await kvLock.release(kv, idKey);
+            await kvLock.release(kv, this.ALL_NAMES_KEY);
         }
     }
 }

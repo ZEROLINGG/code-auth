@@ -2,6 +2,11 @@
   "name": "code-auth",
   "private": true,
   "scripts": {
-    "sdk-wasm-dev": "cd sdk/server/wasm && wasm-pack test --chrome"
+    "sdk-server-wasm-dev": "cd sdk/server/wasm && wasm-pack test --chrome",
+    "sdk-server-wasm-build": "cd sdk/server/wasm && wasm-pack build --target web && cp -r pkg ../../../server_hono/src/tool/",
+    "sdk-client-wasm-dev": "cd sdk/client/wasm && wasm-pack test --chrome",
+    "sdk-client-wasm-build": "cd sdk/client/wasm && wasm-pack build --target web && cp -r pkg /home/zz/Document/Project/Rust/wifi_auth_tauri/src/wasm",
+    "server-dev": "cd server_hono && pnpm dev",
+    "server-deploy": "cd server_hono && pnpm run deploy"
   }
 }

@@ -1,4 +1,4 @@
-//src/_lib_base.rs
+//lib/src/_lib_base.rs
 pub trait Encoder {
     fn encode<T: AsRef<[u8]>>(input: T) -> String;
     fn decode(input: &str) -> Option<Vec<u8>>;
@@ -295,7 +295,7 @@ impl Encoder for Base85 {
 }
 
 const BASE91_ALPHABET: &[u8; 91] =
-    b"abcdefghABCDEFGH0123456789IJKLMNOPQRSTUVWXYZijklmnopqrstuvwxyz!#$%&()*+,./:;<=>?@[]^_`{|}~\"";
+    b"abcdefghABCDEFGH0123456789IJKLMNOPQRSTUVWXYZijklmnopqrstuvwxyz!#$%&()*+,./:;<=>?@[]^_`{|}~'";
 
 const _: () = validate_alphabet(BASE91_ALPHABET);
 
@@ -387,7 +387,6 @@ impl Encoder for Base91 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::time::Instant;
+
 
 }

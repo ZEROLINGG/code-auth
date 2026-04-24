@@ -1,0 +1,175 @@
+import { rsa2048_generate_keypair } from "./pkg";
+export function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+export function randomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+export function random_bytes(length) {
+    try {
+        if (length < 0 || !Number.isInteger(length)) {
+            return null;
+        }
+        const bytes = new Uint8Array(length);
+        crypto.getRandomValues(bytes);
+        return bytes;
+    }
+    catch {
+        return null;
+    }
+}
+export function random_u8() {
+    const bytes = new Uint8Array(1);
+    crypto.getRandomValues(bytes);
+    return bytes[0];
+}
+export function random_u16() {
+    const bytes = new Uint8Array(2);
+    crypto.getRandomValues(bytes);
+    const view = new DataView(bytes.buffer);
+    return view.getUint16(0, true); // little-endian
+}
+export function random_u32() {
+    const bytes = new Uint8Array(4);
+    crypto.getRandomValues(bytes);
+    const view = new DataView(bytes.buffer);
+    return view.getUint32(0, true); // little-endian
+}
+export function random_u64() {
+    const bytes = new Uint8Array(8);
+    crypto.getRandomValues(bytes);
+    const view = new DataView(bytes.buffer);
+    const lo = BigInt(view.getUint32(0, true));
+    const hi = BigInt(view.getUint32(4, true));
+    return (hi << 32n) | lo;
+}
+export class kvLock {
+    /**
+     * 尝试获取锁
+     * @param kv KVNamespace
+     * @param name 锁名
+     * @returns 是否成功获得锁
+     */
+    static async acquire(kv, name) {
+        const key = `L:${name}`;
+        if (await kv.get(key) === "true")
+            return false;
+        await kv.put(key, "true");
+        return true;
+    }
+    /**
+     * 释放锁
+     */
+    static async release(kv, name) {
+        const key = `L:${name}`;
+        await kv.delete(key);
+    }
+    /**
+     * 阻塞式尝试获取锁，最多等待 wait 毫秒
+     * @param kv KVNamespace
+     * @param name 锁名
+     * @param wait 最大等待时间（毫秒）
+     * @param retryDelay 重试间隔（毫秒）
+     * @returns 是否成功获取锁
+     */
+    static async waitAndAcquire(kv, name, wait = 30 * 1000, retryDelay = 1000) {
+        const start = Date.now();
+        while (true) {
+            if (await kvLock.acquire(kv, name)) {
+                return true; // 成功获取锁
+            }
+            const elapsed = Date.now() - start;
+            if (elapsed >= wait) {
+                return false; // 超过最大等待时间
+            }
+            await new Promise(res => setTimeout(res, retryDelay));
+        }
+    }
+}
+export function randomString(length) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const charsLen = chars.length;
+    const result = [];
+    const array = new Uint8Array(length * 2); // 多生成一些字节以应对拒绝采样
+    while (result.length < length) {
+        crypto.getRandomValues(array);
+        for (const b of array) {
+            if (b < 256 - (256 % charsLen)) { // 拒绝掉 248-255 的字节
+                result.push(chars[b % charsLen]);
+                if (result.length === length)
+                    break;
+            }
+        }
+    }
+    return result.join('');
+}
+export function generateUUID() {
+    return crypto.randomUUID();
+}
+/**
+ * 确保 RSA 密钥对存在于 KV 存储中。
+ * 如果不存在（如首次运行或密钥过期），则生成新的密钥对并保存。
+ * 这些密钥用于加密客户端和服务器之间的通信。
+ */
+export async function ensureRSAKeys(kv) {
+    const existingPubKey = await kv.get('rsa_pub_key');
+    const existingPriKey = await kv.get('rsa_pri_key');
+    if (!existingPubKey || !existingPriKey) {
+        const keyPair = rsa2048_generate_keypair();
+        if (!keyPair) {
+            throw Error("rsa2048_generate_keypair: 失败");
+        }
+        await kv.put("rsa_pub_key", keyPair.public_key);
+        await kv.put("rsa_pri_key", keyPair.private_key);
+    }
+    // const existingPubKey = await kv.get('rsa_pub_key_pem');
+    // // 如果公钥不存在，说明需要重新生成密钥对
+    // if (!existingPubKey) {
+    //     const keyPair = await RSA.generateRSAKeyPair();
+    //     const pubKeyPem = await RSA.exportPublicKeyPEM(keyPair.publicKey);
+    //     const priKeyPem = await RSA.exportPrivateKeyPEM(keyPair.privateKey);
+    //
+    //     await kv.put('rsa_pub_key_pem', pubKeyPem, { expirationTtl: CONFIG.RSA_KEY_UPDATE_TIME });
+    //     await kv.put('rsa_pri_key_pem', priKeyPem, { expirationTtl: CONFIG.RSA_KEY_UPDATE_TIME });
+    // }
+}
+/**
+ * 获取客户端真实 IP 地址
+ * 兼容 Cloudflare Workers 标准头和常见的代理头
+ */
+export function getClientIP(c) {
+    return c.req.header('CF-Connecting-IP') ||
+        c.req.header('X-Real-IP') ||
+        c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ||
+        '0.0.0.0';
+}
+// export const serverT = {
+//     now: (): number => {
+//         const nowMs = Date.now();
+//         return Math.floor(nowMs / 1000) - CONFIG.ServerBaseTimestamp; // 秒级相对时间
+//     },
+//     toDate: (T: number): Date => {
+//         return new Date((T + CONFIG.ServerBaseTimestamp) * 1000);
+//     },
+//     fromDate: (date: Date): number => {
+//         return Math.floor(date.getTime() / 1000) - CONFIG.ServerBaseTimestamp;
+//     }
+// };
+// export async function authSuperAdmin(
+//     request: Request,
+//     SUPER_ADMIN_KEY: string,
+//     adminIp: string
+// ): Promise<boolean> {
+//     // 1. 验证 Admin Key (通过自定义头 X-Authorization-A 传递)
+//     const xAuth = request.headers.get('X-Authorization-A') || '';
+//     if (!xAuth || xAuth !== SUPER_ADMIN_KEY) {
+//         console.log('Admin auth failed: Invalid key');
+//         return false;
+//     }
+//
+//     const clientIp = getClientIP(request);
+//     // 3. IP 白名单验证
+//     // adminIp 可以是单个 IP 或逗号分隔的多个 IP (如 "1.1.1.1, 2.2.2.2")
+//     const allowedIPs = adminIp.split(',').map(ip => ip.trim());
+//     return allowedIPs.includes(clientIp);
+// }
